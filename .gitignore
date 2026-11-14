@@ -1,0 +1,19 @@
+/*
+
+!/resources
+!/requirements.txt
+!/README.md
+!/license.txt   
+!/*.ico
+!/*icon.png
+!/screenshot*.png
+!.gitignore
+
+# Slipstream (assets/ and .venv/ are generated, so they stay ignored)
+!/main.py
+!/slipstream
+!/tools
+!/custom
+
+__pycache__/
+git-icon.png
