@@ -10,7 +10,7 @@ import random
 
 import numpy as np
 from PIL import Image
-from panda3d.core import TransparencyAttrib
+from panda3d.core import CardMaker, ColorBlendAttrib, TransparencyAttrib
 
 from .. import config
 from ..assetgen import WALL_PX_W, WALL_PX_H
@@ -68,13 +68,18 @@ def _covers(anchor, opening, reach_x, reach_z):
             abs(anchor[1] - cz) <= reach_z + slack_z)
 
 
-def make_openings(n, difficulty, rng, anchors=None, reach_x=1e9, reach_z=1e9):
-    """Like _try_openings, retried until every approach is covered."""
-    anchors = [(max(-config.HALF_W, min(config.HALF_W, x)), max(CZ_MIN, min(CZ_MAX, z)))
-               for x, z in (anchors or [])]
+def make_openings(n, difficulty, rng, anchors=None, reach_x=1e9, reach_z=1e9, x_range=None):
+    """Like _try_openings, retried until every approach is covered.
+
+    x_range is the (min, max) x for opening centres: the open part of the
+    trench at this wall, which narrows when the side cliffs drift inwards.
+    """
+    lo, hi = x_range or (-config.HALF_W + 3.0, config.HALF_W - 3.0)
+    # the player can't be inside the rock, so approaches are clamped to the open trench
+    anchors = [(max(lo, min(hi, x)), max(CZ_MIN, min(CZ_MAX, z))) for x, z in (anchors or [])]
     best = None
     for _ in range(30):
-        openings, pending = _try_openings(n, difficulty, rng, anchors, reach_x, reach_z)
+        openings, pending = _try_openings(n, difficulty, rng, anchors, reach_x, reach_z, lo, hi)
         if not pending:
             return openings
         if best is None or len(pending) < best[1]:
@@ -82,14 +87,13 @@ def make_openings(n, difficulty, rng, anchors=None, reach_x=1e9, reach_z=1e9):
     return best[0]
 
 
-def _try_openings(n, difficulty, rng, anchors, reach_x, reach_z):
+def _try_openings(n, difficulty, rng, anchors, reach_x, reach_z, lo, hi):
     """Return a list of irregular openings: (cx, cz, base_r, harmonics, stretch).
 
     anchors are the (x, z) spots the player may be coming from (the previous
     wall's openings).  Each anchor gets at least one opening within reach,
     adding openings (up to 3) if needed, so no wall is impossible.
     """
-    lim = config.HALF_W - 3.0
     openings = []
     pending = list(anchors or [])
     rng.shuffle(pending)
@@ -100,10 +104,10 @@ def _try_openings(n, difficulty, rng, anchors, reach_x, reach_z):
         if pending:
             # anywhere inside the reachable window around that approach
             ax, az = pending[0]
-            cx = rng.uniform(max(-lim, ax - reach_x), min(lim, ax + reach_x))
+            cx = rng.uniform(max(lo, ax - reach_x), min(hi, ax + reach_x))
             cz = rng.uniform(max(CZ_MIN, az - reach_z), min(CZ_MAX, az + reach_z))
         else:
-            cx = rng.uniform(-lim, lim)
+            cx = rng.uniform(lo, hi)
             cz = rng.uniform(CZ_MIN, CZ_MAX)
         if any(abs(cx - o[0]) < (base_r + o[2]) * 1.5 + 2.5 for o in openings):
             continue
@@ -159,7 +163,7 @@ def compose_texture(material, solid, rng):
 class Wall:
     kind = "wall"
 
-    def __init__(self, parent, bank, material, y, thickness, openings, rng):
+    def __init__(self, parent, bank, material, y, thickness, openings, rng, light=None):
         self.y = y
         self.thickness = thickness
         self.openings = openings
@@ -178,7 +182,57 @@ class Wall:
             c.setPos(0, -thickness / 2 + thickness * t, 0)
             k = 1.0 - 0.45 * math.sin(math.pi * t) - 0.15 * t   # inner slices darker
             c.setColorScale(k, k, k, 1)
+        self.rim = self.rim_tex = None
+        if light is not None:
+            self._add_hole_lights(*light)
+            self._add_rim_glow(light[1])
         self.alpha = 1.0
+
+    def _add_rim_glow(self, color):
+        """A soft, gently pulsing glow tracing the edge of every opening, on the
+        front face of the wall.  It ignores the fog so holes stand out early."""
+        solid = self.solid.astype(np.float32)
+        # light spilling out of the holes: a wide, soft falloff (~1 unit)
+        spread = box_blur(box_blur(1.0 - solid, 8), 6)
+        a = np.clip(spread * solid * 1.6, 0.0, 1.0)
+        h, w = a.shape
+        rgba = np.zeros((h, w, 4), dtype=np.uint8)
+        rgba[..., 0] = int(255 * min(1.0, 0.55 + 0.45 * color[0]))
+        rgba[..., 1] = int(255 * min(1.0, 0.55 + 0.45 * color[1]))
+        rgba[..., 2] = int(255 * min(1.0, 0.55 + 0.45 * color[2]))
+        rgba[..., 3] = (a * 255).astype(np.uint8)
+        self.rim_tex = Resources.texture_from_array(rgba, "rim")
+        self.rim = card(self.root, self.rim_tex, WALL_W, WALL_H, anchor="bottom")
+        self.rim.setY(-self.thickness / 2 - 0.03)
+        self.rim.setAttrib(ColorBlendAttrib.make(ColorBlendAttrib.M_add, ColorBlendAttrib.O_incoming_alpha,
+                                                 ColorBlendAttrib.O_one))
+        self.rim.setDepthWrite(False)
+        self.rim.setFogOff()
+
+    def _add_hole_lights(self, tex, color):
+        """Bright water glowing through each opening, so holes read as lit
+        windows in the wall even far away (the glow ignores the fog).  The
+        glow sits just behind the wall, so the wall itself hides all but the
+        part showing through the hole."""
+        add = ColorBlendAttrib.make(ColorBlendAttrib.M_add, ColorBlendAttrib.O_incoming_alpha,
+                                    ColorBlendAttrib.O_one)
+        for cx, cz, base_r, _harm, stretch in self.openings:
+            w = base_r * stretch * 1.45 * 2.4
+            h = base_r / stretch * 1.45 * 2.4
+            # trim the glow to the wall's height so it never spills over the top
+            z0, z1 = max(0.0, cz - h / 2), min(WALL_H, cz + h / 2)
+            cm = CardMaker("hole-light")
+            cm.setFrame(cx - w / 2, cx + w / 2, z0, z1)
+            cm.setUvRange((0, (z0 - (cz - h / 2)) / h), (1, (z1 - (cz - h / 2)) / h))
+            g = self.root.attachNewNode(cm.generate())
+            g.setTexture(tex)
+            g.setTwoSided(True)
+            g.setLightOff()
+            g.setY(self.thickness / 2 + 0.4)
+            g.setAttrib(add)
+            g.setDepthWrite(False)
+            g.setFogOff()
+            g.setColor(color[0], color[1], color[2], 0.55)
 
     # -- geometry ------------------------------------------------------------
     @property
@@ -209,6 +263,8 @@ class Wall:
         return False
 
     def update(self, dt, t, player_y):
+        if self.rim is not None:
+            self.rim.setAlphaScale(0.3 + 0.1 * math.sin(t * 3.0 + self.y * 0.1))
         # fade out as the player passes through so the next obstacles show
         a = (self.back + 0.5 - player_y) / (self.thickness + 2.5)
         a = max(0.0, min(1.0, a))
@@ -220,23 +276,25 @@ class Wall:
 
     def remove(self):
         self.root.removeNode()
-        self.tex = None
+        self.tex = self.rim_tex = None
 
 
 class WallFactory:
     def __init__(self, res, theme, seed=None):
         self.theme = theme
         self.bank = MaterialBank(res, theme.wall_materials)
+        self.light = (res.texture("fx", "soft.png"), theme.surface)
         self.rng = np.random.default_rng(seed)
         self.pyrng = random.Random(seed)
 
-    def create(self, parent, y, difficulty, anchors=None, prev_y=0.0):
-        """anchors: (x, z) openings of the previous wall (or the start spot)."""
+    def create(self, parent, y, difficulty, anchors=None, prev_y=0.0, x_range=None):
+        """anchors: (x, z) openings of the previous wall (or the start spot);
+        x_range: where opening centres may go (the open trench at this wall)."""
         n = self.pyrng.choices([1, 2, 3], weights=[0.35, 0.4, 0.25])[0]
         if difficulty > 0.6 and n == 3 and self.pyrng.random() < 0.5:
             n = 2
         rx, rz = reach(prev_y, y)
-        openings = make_openings(n, difficulty, self.pyrng, anchors, rx, rz)
+        openings = make_openings(n, difficulty, self.pyrng, anchors, rx, rz, x_range)
         material = self.pyrng.choice(self.theme.wall_materials)
         thickness = self.pyrng.uniform(0.6, 3.2)
-        return Wall(parent, self.bank, material, y, thickness, openings, self.rng)
+        return Wall(parent, self.bank, material, y, thickness, openings, self.rng, self.light)

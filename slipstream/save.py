@@ -19,7 +19,7 @@ def user_data_dir():
     return p
 
 
-DEFAULTS = {"theme": "reef", "sound": True, "touch": None, "aim": True, "records": {}}
+DEFAULTS = {"theme": "reef", "sound": True, "touch": None, "aim": True, "window": None, "records": {}}
 
 
 class SaveData:

@@ -8,6 +8,7 @@ from .course import Course, DistanceMarker
 from .effects import Bubbles
 from .environment import Environment
 from .player import Player
+from .trench import Trench
 
 
 class World:
@@ -40,7 +41,11 @@ class World:
         self.markers = []
         self.player.reset()
         self.cam_x = self.lead = 0.0
-        self.course = Course(self.root, self.res, self.theme, seed)
+        # every run gets its own pattern of drifting side cliffs
+        self.trench = Trench(seed)
+        self.player.set_trench(self.trench)
+        self.env.set_trench(self.trench)
+        self.course = Course(self.root, self.res, self.theme, seed, self.trench)
         self.course.fill(self.player.y, 0.0)
         if record["last_distance"] > 20:
             self.markers.append(DistanceMarker(self.root, self.res, record["last_distance"],

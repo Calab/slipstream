@@ -239,7 +239,43 @@ def ocean_bed(dur, seed=0):
     return n * swell * 0.5
 
 
-INSTRUMENTS = {"whistle": inst_whistle, "accordion": inst_accordion, "marimba": inst_marimba}
+def inst_fiddle(freq, dur):
+    """Bowed string: bright sawtooth-like tone with vibrato and a bow attack."""
+    t = _t(dur)
+    vib = 1 + 0.007 * np.sin(2 * np.pi * 6.0 * t) * np.minimum(1, t * 4)
+    ph = 2 * np.pi * freq * np.cumsum(vib) / SR
+    out = np.zeros_like(t)
+    for k in range(1, 9):
+        out += np.sin(k * ph) / k * (1.0 if k < 4 else 0.7)
+    scratch = _bandpass(_noise(len(t), int(freq) + 3), 1500, 5000) * np.exp(-t * 40) * 0.15
+    return (out * 0.35 + scratch) * _adsr(len(t), 0.02, 0.08, 0.8, 0.05)
+
+
+INSTRUMENTS = {"whistle": inst_whistle, "accordion": inst_accordion, "marimba": inst_marimba,
+               "fiddle": inst_fiddle}
+
+# Each theme has MUSIC_STAGES different tunes.  The game moves to the next one
+# every 10 walls/obstacles; past the last it alternates the final four.
+MUSIC_STAGES = 8
+# per stage: how busy the arrangement is (0-4), speed multiplier, key shift
+STAGE_INTENSITY = [1, 1, 2, 2, 3, 3, 4, 4]
+STAGE_SPEED = [1.15, 1.18, 1.21, 1.24, 1.27, 1.30, 1.33, 1.36]
+STAGE_KEY = [0, 5, -3, 2, 0, 5, -3, 2]
+
+# chord progressions (scale degrees, one per bar) for the contrasting B section
+B_PROGRESSIONS = [
+    (3, 3, 0, 0, 4, 4, 0, 0),
+    (5, 3, 0, 4, 5, 3, 4, 4),
+    (0, 4, 5, 3, 0, 3, 4, 0),
+    (3, 4, 0, 5, 3, 4, 4, 0),
+]
+
+# rhythm cells (in eighth notes) for 6/8 jigs and 4/4 hornpipes
+PATTERNS = {
+    6: [[3, 3], [2, 1, 2, 1], [3, 2, 1], [1, 1, 1, 3], [2, 1, 3], [1, 1, 1, 2, 1], [6]],
+    8: [[2, 2, 2, 2], [1, 1, 2, 2, 2], [3, 1, 2, 2], [2, 1, 1, 2, 2], [1, 1, 1, 1, 2, 2],
+        [3, 1, 3, 1], [4, 4]],
+}
 
 
 def _add(buf, sig, start, gain, loop=True):
@@ -260,10 +296,13 @@ def _add(buf, sig, start, gain, loop=True):
                 rest = rest[k:]
 
 
-def _melody(rng, scale, root, chord_roots, beats_per_bar, octave_span=9):
-    """Generate a 6/8 shanty-ish melody: list of (start_beat, length_beats, midi)."""
+def _melody(rng, scale, root, chord_roots, beats_per_bar, octave_span=9, bar_offset=0):
+    """A shanty-ish melody: list of (start_beat, length_beats, midi).
+
+    Bars 1 and 3 of each four-bar phrase repeat a motif, so tunes are hummable.
+    """
     notes = []
-    patterns = [[3, 3], [2, 1, 2, 1], [3, 2, 1], [1, 1, 1, 3], [2, 1, 3], [6]]
+    patterns = PATTERNS[beats_per_bar]
     deg = 4
     motif_a = [patterns[rng.integers(len(patterns))] for _ in range(2)]
     for bar, croot in enumerate(chord_roots):
@@ -278,79 +317,101 @@ def _melody(rng, scale, root, chord_roots, beats_per_bar, octave_span=9):
                 choices = [croot, croot + 2, croot + 4, croot + 7]
                 deg = min(choices, key=lambda c: abs(c - deg) + rng.uniform(0, 2.5))
             else:
-                deg += int(rng.choice([-2, -1, -1, 1, 1, 2, 0]))
+                deg += int(rng.choice([-2, -1, -1, 1, 1, 2, 0, 3, -3]))
             deg = int(np.clip(deg, 0, octave_span + 2))
             if bar == len(chord_roots) - 1 and beat + L >= beats_per_bar:
                 deg = 7 if deg > 3 else 0  # resolve to the tonic
             o, s = divmod(deg, 7)
-            notes.append((bar * beats_per_bar + beat, L, root + 12 * o + scale[s]))
+            notes.append(((bar + bar_offset) * beats_per_bar + beat, L, root + 12 * o + scale[s]))
             beat += L
     return notes
 
 
-def render_music(params, stage, bars=8):
-    """Render one looping music stage for a theme.  Higher stages are busier."""
+def render_music(params, stage):
+    """Render one looping tune for a theme.
+
+    Every stage is a different tune: jigs (6/8) and hornpipes (4/4) alternate,
+    each with an A section on the theme's chord progression and a contrasting
+    B section, a changing lead instrument and key, and an arrangement that gets
+    busier and faster as the stages go up.
+    """
+    stage = min(stage, MUSIC_STAGES - 1)
     rng = np.random.default_rng(params["seed"] * 100 + stage)
     scale = SCALES[params["scale"]]
-    root = params["root"] + (2 if stage >= 4 else 0)
-    bpm = params["bpm"] * (1 + 0.05 * min(stage, 4))
-    beats_per_bar = 6                     # 6/8 time, counting eighth notes
+    root = params["root"] + STAGE_KEY[stage]
+    intensity = STAGE_INTENSITY[stage]
+    bpm = params["bpm"] * STAGE_SPEED[stage]
+    beats_per_bar = 6 if stage % 2 == 0 else 8      # jig / hornpipe
+    leads = [params["lead"], "fiddle", "accordion", params["lead"], "whistle", "fiddle",
+             params["lead"], "fiddle"]
+    lead = INSTRUMENTS[leads[stage]]
     eighth = 60.0 / bpm / 2
     bar_len = eighth * beats_per_bar
+    prog_a = list(params["progression"])[:8]
+    prog_b = list(B_PROGRESSIONS[(params["seed"] + stage) % len(B_PROGRESSIONS)])
+    prog = prog_a + prog_b                           # 16 bars: A then B
+    bars = len(prog)
     dur = bar_len * bars
     n = int(dur * SR)
     buf = np.zeros(n)
-    prog = list(params["progression"])[:bars]
-    lead = INSTRUMENTS[params["lead"]]
+    strong = (0, 3) if beats_per_bar == 6 else (0, 4)
 
     def chord(degree):
         return [root - 12 + 12 * ((degree + k) // 7) + scale[(degree + k) % 7] for k in (0, 2, 4)]
 
-    # pad chords (always)
+    def at(bar, beat):
+        return int((bar * beats_per_bar + beat) * eighth * SR)
+
+    # pad chords and ocean ambience (always)
     for b, deg in enumerate(prog):
         for m in chord(deg):
-            _add(buf, inst_pad(midi_hz(m), bar_len * 1.05), int(b * bar_len * SR), 0.10)
+            _add(buf, inst_pad(midi_hz(m), bar_len * 1.05), at(b, 0), 0.08)
+    buf += ocean_bed(dur, params["seed"])[:n] * 0.22
 
-    # ocean ambience (always)
-    buf += ocean_bed(dur, params["seed"])[:n] * (0.35 if stage == 0 else 0.25)
-
-    # melody (always; higher stages double it an octave up)
-    mel = _melody(rng, scale, root + 12, prog, beats_per_bar)
+    # melody: A and B sections are composed separately
+    mel = (_melody(rng, scale, root + 12, prog_a, beats_per_bar) +
+           _melody(rng, scale, root + 12, prog_b, beats_per_bar, bar_offset=8))
     for st, L, m in mel:
         s = int(st * eighth * SR)
         _add(buf, lead(midi_hz(m), L * eighth * 0.95), s, 0.30)
-        if stage >= 3:
-            _add(buf, inst_marimba(midi_hz(m + 12), L * eighth), s, 0.08)
+        if intensity >= 3:
+            _add(buf, inst_marimba(midi_hz(m + 12), L * eighth), s, 0.07)
+        if intensity >= 4:  # harmony a third below in the B section
+            if st >= 8 * beats_per_bar:
+                deg_idx = min(range(7), key=lambda i: abs((root + 12 + scale[i]) % 12 - m % 12))
+                h = m - (scale[deg_idx] - scale[(deg_idx - 2) % 7]) % 12
+                _add(buf, inst_accordion(midi_hz(h), L * eighth * 0.9), s, 0.09)
 
-    # bass from stage 1: "oom-pah" on beats 1 and 4
-    if stage >= 1:
+    # bass: "oom-pah" on the strong beats; walking eighths at full intensity
+    for b, deg in enumerate(prog):
+        r = chord(deg)[0] - 12
+        if intensity >= 4:
+            steps = [r, r + 7, r + 12, r + 7] * 2
+            for i in range(0, beats_per_bar, 2):
+                _add(buf, inst_bass(midi_hz(steps[i // 2]), eighth * 1.8), at(b, i), 0.3)
+        else:
+            for beat, m in zip(strong, (r, r + 7)):
+                _add(buf, inst_bass(midi_hz(m), eighth * 2.6), at(b, beat), 0.33)
+
+    # percussion: a heartbeat drum from the start, more layers as it builds
+    for b in range(bars):
+        for beat in range(beats_per_bar):
+            s = at(b, beat)
+            if beat in strong:
+                _add(buf, drum("low"), s, 0.42)
+            if intensity >= 2 and beat not in strong:
+                _add(buf, drum("shaker", b * 8 + beat), s, 0.45)
+            if intensity >= 3 and beat == strong[1]:
+                _add(buf, drum("tap", b), s, 0.38)
+            if intensity >= 4 and beat == beats_per_bar - 1 and b % 4 == 3:
+                _add(buf, drum("tap", b + 50), s + int(eighth * SR / 2), 0.3)
+
+    # rhythm chords on the off-beats (accordion "chop") from intensity 2
+    if intensity >= 2:
+        offs = (1, 2, 4, 5) if beats_per_bar == 6 else (1, 3, 5, 7)
         for b, deg in enumerate(prog):
-            r = chord(deg)[0] - 12
-            for beat, m in ((0, r), (3, r + 7)):
-                s = int((b * beats_per_bar + beat) * eighth * SR)
-                _add(buf, inst_bass(midi_hz(m), eighth * 2.8), s, 0.35)
-
-    # percussion from stage 2
-    if stage >= 2:
-        for b in range(bars):
-            for beat in range(beats_per_bar):
-                s = int((b * beats_per_bar + beat) * eighth * SR)
-                if beat in (0, 3):
-                    _add(buf, drum("low"), s, 0.45)
-                elif stage >= 3 or beat in (2, 5):
-                    _add(buf, drum("shaker", b * 6 + beat), s, 0.5)
-                if stage >= 4 and beat == 3:
-                    _add(buf, drum("tap", b), s, 0.4)
-
-    # counter-melody / harmony from stage 3 (accordion chords on off-beats)
-    if stage >= 3:
-        for b, deg in enumerate(prog):
-            for beat in (1, 2, 4, 5):
-                s = int((b * beats_per_bar + beat) * eighth * SR)
+            for beat in offs:
                 for m in chord(deg):
-                    _add(buf, inst_accordion(midi_hz(m + 12), eighth * 0.6), s, 0.05)
+                    _add(buf, inst_accordion(midi_hz(m + 12), eighth * 0.5), at(b, beat), 0.045)
 
     return buf * 0.8
-
-
-MUSIC_STAGES = 5

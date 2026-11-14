@@ -35,6 +35,7 @@ the square. The sizes listed are what the generator makes; bigger works too.
 | `obstacles/` | `chest_0`, `boulder_0`, `anchor_0`, `barrel_0` | 256×256 | Sit on the sea floor, so the artwork must **touch the bottom edge** of the image. |
 | `obstacles/` | `neptune_0`, `mine_0`, `net_0` | 256×256 | Float in the water. Mines get a chain drawn to the floor automatically. |
 | `obstacles/` | `octopus_0`…`octopus_5`, `jellyfish_0`…`jellyfish_5` | 256×256, 6 frames | Floating and animated. |
+| `obstacles/` | `iceberg_0`, `hook_0`, `galleon_0` | 256×256 | Hang down from the surface, so the artwork must **touch the top edge** of the image. Their danger zone is set in `themes.py` (`hit`): the hook's is its point near the bottom, not the line. |
 | `rewards/` | `pearl`, `shell`, `starfish`, `gem` | 256×256 | A soft glow around the item helps them stand out. |
 | `boats/` | `sailboat`, `warship`, `trawler` | 256×160 | Side view, waterline near the bottom edge. |
 | `decor/` | `coral0`–`coral2`, `weed0`, `weed1` | 128×128 | Scenery on the sea floor (doesn't collide). Should touch the bottom edge. |
@@ -62,4 +63,4 @@ the image, so keep each object roughly filling its square.
 | `sfx/` | `splat` | Hitting a wall or obstacle. |
 | `sfx/` | `chime0`–`chime3` | Rewards: pearl, shell, starfish, gem. |
 | `sfx/` | `bounce`, `fanfare`, `gameover`, `click` | Floor/side bounce, new best time, game over, menu click. |
-| `music/` | `<theme>_0` … `<theme>_4` | Looping music. Stage 0 plays first, and the music moves up a stage every 10 walls/obstacles. After stage 4 it alternates between stages 3 and 4. Tracks should loop seamlessly. |
+| `music/` | `<theme>_0` … `<theme>_7` | Looping music. Tune 0 plays first, and the music moves to the next tune every 10 walls/obstacles. After tune 7 it cycles through tunes 4–7. Tracks should loop seamlessly. |

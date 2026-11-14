@@ -6,17 +6,17 @@ The sea floor is at z = 0 and the water surface at z = WORLD_H.
 """
 
 TITLE = "Slipstream"
-ASSET_VERSION = 6          # bump to force regeneration of procedural assets
+ASSET_VERSION = 10          # bump to force regeneration of procedural assets
 
 # --- World geometry -------------------------------------------------------
 WORLD_H = 10.0             # height of the water column (floor -> surface)
 HALF_W = 24.0              # half width of the swimmable corridor
 WALL_EXTRA = 2.0           # walls extend this far into the side cliffs
 PPU = 16                   # wall texture pixels per world unit
-SPAWN_AHEAD = 120.0        # how far ahead of the player things are created
+SPAWN_AHEAD = 165.0        # how far ahead of the player things are created
 DESPAWN_BEHIND = 25.0      # how far behind the player things are removed
-FOG_NEAR = 4.0
-FOG_FAR = 118.0
+FOG_NEAR = 10.0
+FOG_FAR = 165.0            # walls emerge from the haze this far ahead
 
 # --- Player ---------------------------------------------------------------
 FISH_RADIUS = 0.45         # collision radius
@@ -46,9 +46,11 @@ CAM_LEAD_RELAX = 0.6        # how slowly that offset relaxes once you stop (per 
 # --- Health ---------------------------------------------------------------
 HEALTH_MAX = 100.0
 HEALTH_REGEN = 0.6          # per second
-WALL_DAMAGE = 22.0
+WALL_DAMAGE = 25.0
 OBSTACLE_DAMAGE = 14.0
 HIT_INVULNERABLE = 0.9      # seconds
+CLIFF_DAMAGE = 5.0          # scraping against a side cliff
+CLIFF_COOLDOWN = 1.0        # seconds between cliff hits (so being pinned doesn't drain you)
 
 # --- Progression ----------------------------------------------------------
 MUSIC_STAGE_EVERY = 10      # walls/obstacles passed per music change

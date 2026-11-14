@@ -277,24 +277,43 @@ def sub_frame(phase):
 # ---------------------------------------------------------------------------
 
 def chest():
+    """A closed, barnacle-crusted sea chest (no treasure showing, so it does
+    not look like a reward)."""
     img, d = _canvas()
-    wood, wdark, gold = (140, 82, 35), (85, 45, 18), (240, 195, 50)
-    x0, x1, yb, yt = 86, 426, 440, 250
-    # gold glow and coins spilling from the open lid
-    img.alpha_composite(glow_layer((S, S), (256, 250), 200, (255, 220, 90), 0.8))
-    d.polygon([(x0 + 10, yt), (x0 + 40, 150), (x1 - 40, 150), (x1 - 10, yt)],
-              fill=_rgba(wdark), outline=OL, width=OW)  # lid interior
-    for i in range(14):
-        cxp = x0 + 50 + (i * 37) % 250
-        cyp = yt - 10 - (i * 13) % 50
-        d.ellipse((cxp - 20, cyp - 12, cxp + 20, cyp + 12), fill=_rgba(gold), outline=OL, width=4)
+    wood, wdark, iron = (120, 74, 38), (70, 40, 18), (70, 74, 80)
+    x0, x1, yb, yt = 80, 432, 448, 268
+    # domed lid
+    d.chord((x0, yt - 120, x1, yt + 110), 180, 360, fill=_rgba(_shade(wood, 0.9)), outline=OL, width=OW)
+    d.line([(x0 + 4, yt - 4), (x1 - 4, yt - 4)], fill=OL, width=10)
+    # body
     d.rectangle((x0, yt, x1, yb), fill=_rgba(wood), outline=OL, width=OW)
     for y in range(yt + 45, yb, 45):
         d.line([(x0 + 4, y), (x1 - 4, y)], fill=_rgba(wdark), width=5)
-    for x in (x0 + 30, x1 - 30, 256):
-        d.rectangle((x - 13, yt, x + 13, yb), fill=_rgba(gold), outline=OL, width=4)
-    d.rounded_rectangle((226, yt + 20, 286, yt + 90), radius=10, fill=_rgba(gold), outline=OL, width=5)
-    d.ellipse((248, yt + 42, 264, yt + 60), fill=OL)
+    for k in range(1, 4):  # lid planks
+        d.arc((x0 + k * 22, yt - 120 + k * 16, x1 - k * 22, yt + 110), 195, 345, fill=_rgba(wdark), width=4)
+    # iron bands over lid and body
+    for x in (x0 + 34, x1 - 34):
+        d.rectangle((x - 14, yt, x + 14, yb), fill=_rgba(iron), outline=OL, width=4)
+        d.line([(x, yt - 2), (x, yt - 98 + abs(x - 256) * 0.35)], fill=OL, width=32)
+        d.line([(x, yt - 2), (x, yt - 98 + abs(x - 256) * 0.35)], fill=_rgba(iron), width=22)
+        for yy in range(yt + 25, yb - 10, 40):
+            d.ellipse((x - 5, yy - 5, x + 5, yy + 5), fill=(150, 150, 155, 255))
+    # lock plate
+    d.rounded_rectangle((224, yt - 24, 288, yt + 50), radius=8, fill=(110, 95, 60, 255), outline=OL, width=5)
+    d.ellipse((248, yt + 2, 264, yt + 20), fill=OL)
+    d.rectangle((253, yt + 14, 259, yt + 34), fill=OL)
+    # algae and barnacles from years on the sea bed
+    rng = np.random.default_rng(12)
+    for _ in range(40):
+        bx, by = rng.uniform(x0 + 10, x1 - 10), rng.uniform(yt - 70, yb - 10)
+        if by < yt and abs(bx - 256) > 150 - (yt - by) * 0.9:
+            continue
+        r = rng.uniform(5, 12)
+        if rng.random() < 0.5:
+            d.ellipse((bx - r, by - r, bx + r, by + r), fill=(210, 205, 185, 255), outline=(90, 85, 75, 255), width=3)
+            d.ellipse((bx - r / 3, by - r / 3, bx + r / 3, by + r / 3), fill=(60, 55, 50, 255))
+        else:
+            d.ellipse((bx - r * 1.6, by - r, bx + r * 1.6, by + r), fill=(60, 110, 50, 200))
     return finish(img, OUT)
 
 
@@ -427,39 +446,271 @@ def jellyfish_frame(phase):
     return finish(img, OUT)
 
 
+def _shaded_poly(img, pts, light, dark, hl=(-0.3, -0.4)):
+    """Fill a polygon with a soft radial gradient (for rounded-looking shapes)."""
+    xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+    bbox = (min(xs) - 10, min(ys) - 10, max(xs) + 10, max(ys) + 10)
+    layer = radial_layer((S, S), bbox, light, dark, hl=hl, power=1.0)
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).polygon(pts, fill=255)
+    layer.putalpha(Image.fromarray(np.minimum(np.asarray(layer)[..., 3], np.asarray(mask))))
+    img.alpha_composite(layer)
+
+
+def _limb(d, pts, width, color):
+    d.line(pts, fill=OL, width=width + 10, joint="curve")
+    d.line(pts, fill=_rgba(color), width=width, joint="curve")
+    for x, y in pts:
+        r = width / 2
+        d.ellipse((x - r, y - r, x + r, y + r), fill=_rgba(color))
+
+
 def neptune():
+    """Neptune / Poseidon as a full merman: crowned, bearded, trident in hand,
+    with a scaled fish tail curling beneath him."""
     img, d = _canvas()
-    skin, skind = (120, 190, 185), (60, 120, 120)
+    skin, skin_d, skin_l = (110, 185, 180), (45, 110, 115), (175, 230, 220)
+    tail_d, tail_l = (15, 60, 85), (110, 190, 210)
+    fin = (90, 200, 200, 255)
     gold = (245, 200, 50, 255)
-    # trident
-    d.rectangle((400, 60, 416, 500), fill=gold, outline=OL, width=4)
-    for x in (366, 408, 450):
-        d.polygon([(x - 10, 140), (x, 40), (x + 10, 140)], fill=gold, outline=OL, width=4)
-    d.rounded_rectangle((360, 130, 456, 150), radius=6, fill=gold, outline=OL, width=4)
-    # shoulders
-    img.alpha_composite(radial_layer((S, S), (70, 330, 440, 620), skin, skind, hl=(-0.2, -0.6)))
-    # head
-    img.alpha_composite(radial_layer((S, S), (156, 120, 356, 330), (170, 225, 215), skind, hl=(-0.2, -0.4)))
-    d.ellipse((156, 120, 356, 330), outline=OL, width=OW)
-    # beard
-    beard = [(150, 240), (180, 300), (190, 420), (230, 480), (256, 500), (282, 480), (322, 420),
-             (332, 300), (362, 240), (330, 290), (256, 310), (182, 290)]
+
+    # --- fish tail: a tapered curve from the hips down and round to the right
+    def bez(t):
+        p0, p1, p2, p3 = (232, 300), (215, 420), (300, 470), (395, 430)
+        u = 1 - t
+        x = u ** 3 * p0[0] + 3 * u * u * t * p1[0] + 3 * u * t * t * p2[0] + t ** 3 * p3[0]
+        y = u ** 3 * p0[1] + 3 * u * u * t * p1[1] + 3 * u * t * t * p2[1] + t ** 3 * p3[1]
+        return x, y
+    left, right, centre = [], [], []
+    n = 24
+    for i in range(n + 1):
+        t = i / n
+        x, y = bez(t)
+        x2, y2 = bez(min(1, t + 0.01)) if t < 1 else bez(t)
+        x1, y1 = bez(max(0, t - 0.01))
+        dx, dy = x2 - x1, y2 - y1
+        L = math.hypot(dx, dy) or 1
+        nx, ny = -dy / L, dx / L
+        w = 52 * (1 - t) + 14 * t
+        left.append((x + nx * w, y + ny * w))
+        right.append((x - nx * w, y - ny * w))
+        centre.append((x, y))
+    tail_poly = left + right[::-1]
+    # tail fin (fluke) at the end
+    ex, ey = centre[-1]
+    fluke = [(ex - 6, ey - 8), (ex + 60, ey - 75), (ex + 45, ey - 20), (ex + 80, ey + 25),
+             (ex + 20, ey + 12), (ex - 6, ey + 8)]
+    d.polygon(fluke, fill=fin, outline=OL, width=OW)
+    for k in range(1, 4):
+        d.line([(ex, ey), (ex + 18 * k, ey - 60 + 26 * k)], fill=_rgba(tail_d), width=3)
+    _shaded_poly(img, tail_poly, tail_l, tail_d, hl=(-0.4, -0.6))
+    for i in range(2, n - 2, 2):              # scale rows along the tail
+        x, y = centre[i]
+        w = (52 * (1 - i / n) + 14 * i / n) * 0.75
+        for k in (-1, 0, 1):
+            d.arc((x - 12 + k * w * 0.6, y - 9, x + 12 + k * w * 0.6, y + 9), 20, 160,
+                  fill=_rgba(tail_d), width=3)
+    d.polygon(tail_poly, outline=OL, width=OW)
+
+    # --- trident (behind the raised arm)
+    d.line([(392, 22), (372, 492)], fill=OL, width=20)
+    d.line([(392, 22), (372, 492)], fill=gold, width=11)
+    for dx in (-30, 0, 30):
+        x = 392 + dx
+        d.polygon([(x - 9, 72), (x, 12), (x + 9, 72)], fill=gold, outline=OL, width=4)
+    d.rounded_rectangle((356, 66, 428, 84), radius=6, fill=gold, outline=OL, width=4)
+
+    # --- arms
+    _limb(d, [(170, 192), (122, 250), (165, 300)], 34, skin)            # hand on hip
+    _limb(d, [(298, 192), (352, 165), (388, 120)], 34, skin)            # gripping trident
+    d.ellipse((370, 100, 406, 136), fill=_rgba(skin), outline=OL, width=5)
+
+    # --- torso
+    torso = [(150, 200), (158, 186), (175, 178), (291, 178), (308, 186), (316, 200),
+             (300, 228), (282, 300), (186, 300), (166, 228)]
+    _shaded_poly(img, torso, skin_l, skin_d, hl=(-0.3, -0.5))
+    d.polygon(torso, outline=OL, width=OW)
+    d.arc((180, 195, 235, 245), 20, 160, fill=_rgba(skin_d), width=4)     # chest
+    d.arc((230, 195, 285, 245), 20, 160, fill=_rgba(skin_d), width=4)
+    for y in (258, 278):                                                   # abs
+        d.line([(214, y), (252, y)], fill=_rgba(skin_d), width=3)
+    d.line([(233, 250), (233, 292)], fill=_rgba(skin_d), width=3)
+    # belt of shells where skin meets scales
+    d.rounded_rectangle((180, 290, 290, 314), radius=10, fill=(200, 160, 90, 255), outline=OL, width=5)
+    for x in (200, 235, 270):
+        d.pieslice((x - 13, 288, x + 13, 314), 180, 360, fill=(255, 190, 170, 255), outline=OL, width=3)
+
+    # --- head, beard and crown
+    d.ellipse((193, 72, 273, 172), fill=_rgba(skin_l), outline=OL, width=OW)
+    beard = [(190, 128), (198, 175), (214, 225), (233, 250), (252, 225), (268, 175), (276, 128),
+             (260, 150), (233, 158), (206, 150)]
     d.polygon(beard, fill=(235, 240, 250, 255), outline=OL, width=OW)
-    for x in range(200, 320, 22):
-        d.line([(x, 320), (x + 8, 440)], fill=(190, 200, 215, 255), width=4)
-    d.arc((210, 255, 300, 300), 200, 340, fill=(240, 245, 255, 255), width=14)  # moustache
-    # eyes and brows
+    for x in (214, 226, 240, 252):
+        d.line([(x, 165), (x + 4, 220)], fill=(185, 195, 210, 255), width=3)
+    d.arc((205, 132, 261, 160), 200, 340, fill=(240, 245, 255, 255), width=10)   # moustache
     for side in (-1, 1):
-        ex = 256 + side * 40
-        d.ellipse((ex - 16, 200, ex + 16, 226), fill=(255, 255, 255, 255), outline=OL, width=4)
-        d.ellipse((ex - 7, 206, ex + 7, 222), fill=(20, 40, 80, 255))
-        d.line([(ex - 24, 190 - side * 0), (ex + 22, 186)], fill=(235, 240, 250, 255), width=10)
-    # crown
-    crown = [(170, 150), (180, 70), (215, 120), (256, 50), (297, 120), (332, 70), (342, 150)]
+        ex = 233 + side * 18
+        d.ellipse((ex - 9, 112, ex + 9, 128), fill=(255, 255, 255, 255), outline=OL, width=3)
+        d.ellipse((ex - 4, 115, ex + 4, 125), fill=(20, 40, 80, 255))
+        d.line([(ex - 13, 104), (ex + 12, 101 + side * 2)], fill=(235, 240, 250, 255), width=7)
+    d.line([(190, 100), (186, 150)], fill=(235, 240, 250, 255), width=10)          # hair at the sides
+    d.line([(276, 100), (280, 150)], fill=(235, 240, 250, 255), width=10)
+    crown = [(196, 92), (200, 40), (217, 72), (233, 28), (249, 72), (266, 40), (270, 92)]
     d.polygon(crown, fill=gold, outline=OL, width=OW)
-    for x, c in ((215, (220, 30, 60)), (256, (40, 120, 230)), (297, (220, 30, 60))):
-        d.ellipse((x - 10, 125, x + 10, 145), fill=c + (255,), outline=OL, width=3)
+    for x, c in ((217, (220, 30, 60)), (233, (40, 120, 230)), (249, (220, 30, 60))):
+        d.ellipse((x - 7, 76, x + 7, 90), fill=c + (255,), outline=OL, width=3)
     return finish(img, OUT)
+
+
+# ---------------------------------------------------------------------------
+# Obstacles that hang down from the surface
+# ---------------------------------------------------------------------------
+
+def _vgrad_poly(img, pts, top, bottom, mid=None):
+    """Fill a polygon with a top-to-bottom gradient (top, [mid], bottom)."""
+    ys = [p[1] for p in pts]
+    y0, y1 = min(ys), max(ys)
+    t = np.clip((np.arange(S, dtype=np.float32) - y0) / max(y1 - y0, 1), 0, 1)[:, None, None]
+    top, bottom = np.array(top, np.float32), np.array(bottom, np.float32)
+    if mid is not None:
+        mid = np.array(mid, np.float32)
+        col = np.where(t < 0.5, top + (mid - top) * (t * 2), mid + (bottom - mid) * (t * 2 - 1))
+    else:
+        col = top + (bottom - top) * t
+    col = np.broadcast_to(col, (S, S, 3))
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).polygon(pts, fill=255)
+    arr = np.dstack([np.clip(col, 0, 255), np.asarray(mask, dtype=np.float32)]).astype(np.uint8)
+    img.alpha_composite(Image.fromarray(arr, "RGBA"))
+
+
+def ceiling(img):
+    """Shift the artwork up so its highest opaque pixel touches the top edge
+    (used for things hanging from the surface)."""
+    a = np.asarray(img)[..., 3]
+    rows = np.where(a.max(axis=1) > 40)[0]
+    if not len(rows):
+        return img
+    out = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    out.paste(img, (0, -rows[0]))
+    return out
+
+
+def iceberg(seed=31):
+    """The underwater part of an iceberg: flat at the waterline, jagged below."""
+    img, d = _canvas()
+    rng = np.random.default_rng(seed)
+    left = [(26, 0), (18, 60)]
+    right = [(486, 0), (494, 70)]
+    for i in range(1, 7):                       # jagged sides narrowing downwards
+        t = i / 7
+        y = 60 + t * 330
+        left.append((18 + 170 * t ** 1.3 + rng.uniform(-22, 22), y + rng.uniform(-15, 15)))
+        right.append((494 - 150 * t ** 1.2 + rng.uniform(-22, 22), y + rng.uniform(-15, 15)))
+    tip = [(300 + rng.uniform(-30, 30), 470), (250, 430), (220, 500), (190, 440)]
+    poly = left + tip[::-1] + right[::-1]
+    _vgrad_poly(img, poly, (250, 254, 255), (60, 120, 180), mid=(185, 220, 240))
+    # facets: lighter and darker planes, blended on (drawing translucent
+    # shapes directly would punch see-through holes instead)
+    facets = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    fd = ImageDraw.Draw(facets)
+    for _ in range(14):
+        x0, y0 = rng.uniform(60, 450), rng.uniform(20, 340)
+        pts = [(x0, y0), (x0 + rng.uniform(-70, 70), y0 + rng.uniform(40, 110)),
+               (x0 + rng.uniform(-70, 70), y0 + rng.uniform(40, 110))]
+        shade = (255, 255, 255, 70) if rng.random() < 0.5 else (40, 90, 150, 55)
+        fd.polygon(pts, fill=shade)
+    img.alpha_composite(facets)
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).polygon(poly, fill=255)
+    img.putalpha(Image.fromarray(np.minimum(np.asarray(img)[..., 3], np.asarray(mask))))
+    d = ImageDraw.Draw(img)
+    d.rectangle((26, 0, 486, 10), fill=(255, 255, 255, 230))       # bright waterline
+    d.polygon(poly, outline=(30, 70, 110, 255), width=OW)
+    return ceiling(finish(img, OUT))
+
+
+def hook():
+    """A fishing hook on a line, hanging from a bobber at the surface."""
+    img, d = _canvas()
+    cx = 256
+    # bobber at the surface
+    d.ellipse((cx - 26, 0, cx + 26, 52), fill=(230, 40, 40, 255), outline=OL, width=5)
+    d.chord((cx - 26, 0, cx + 26, 52), 0, 180, fill=(250, 250, 250, 255), outline=OL, width=5)
+    # line
+    d.line([(cx, 52), (cx, 352)], fill=(30, 30, 30, 255), width=7)
+    d.line([(cx, 52), (cx, 352)], fill=(220, 225, 230, 255), width=3)
+    # eye, shank and bend
+    steel, dark = (205, 212, 222, 255), (110, 118, 130, 255)
+    d.ellipse((cx - 16, 340, cx + 16, 372), outline=OL, width=14)
+    d.ellipse((cx - 16, 340, cx + 16, 372), outline=steel, width=7)
+    d.line([(cx, 372), (cx, 452)], fill=OL, width=22)
+    d.line([(cx, 372), (cx, 452)], fill=steel, width=12)
+    d.arc((cx - 92, 392, cx + 8, 492), 0, 180, fill=OL, width=22)
+    d.arc((cx - 92, 392, cx + 8, 492), 0, 180, fill=steel, width=12)
+    # point and barb
+    d.line([(cx - 88, 442), (cx - 88, 400)], fill=OL, width=20)
+    d.line([(cx - 88, 442), (cx - 88, 400)], fill=steel, width=10)
+    d.polygon([(cx - 98, 404), (cx - 88, 372), (cx - 78, 404)], fill=steel, outline=OL, width=4)
+    d.polygon([(cx - 88, 418), (cx - 64, 432), (cx - 86, 432)], fill=dark, outline=OL, width=3)
+    d.line([(cx - 4, 380), (cx - 4, 448)], fill=(250, 252, 255, 255), width=3)   # highlight
+    return ceiling(finish(img, OUT))
+
+
+def galleon():
+    """An old galleon's hull from the side, as seen from under the water: the
+    waterline along the top, the bow sweeping down on the left to a long keel,
+    and the stern post and rudder on the right."""
+    img, _ = _canvas()
+    rng = np.random.default_rng(41)
+    wdark = (55, 32, 15)
+    copper, copper_d = (75, 155, 128), (28, 82, 72)
+    keel_y = 232
+    # hull outline: bow curve (left), keel, stern post (right)
+    bow = []
+    for i in range(13):
+        t = i / 12
+        bow.append((12 + 120 * (1 - math.cos(t * math.pi / 2)), keel_y * math.sin(t * math.pi / 2)))
+    hull = bow + [(440, keel_y), (462, 150), (474, 0)]
+    _vgrad_poly(img, hull, (150, 96, 52), (90, 52, 24))
+    # copper sheathing below the old waterline
+    copper_poly = [(14 + 120 * (1 - math.cos(math.asin(105 / keel_y))), 105)] + \
+                  [p for p in hull if p[1] > 105] + [(466, 105)]
+    _vgrad_poly(img, copper_poly, copper, copper_d)
+    d = ImageDraw.Draw(img)
+    # planks running along the hull (clipped to the hull afterwards)
+    planks = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    pd = ImageDraw.Draw(planks)
+    for y in range(26, keel_y, 26):
+        pd.line([(0, y), (S, y + 4)], fill=(60, 35, 15, 150) if y < 105 else (20, 60, 52, 150), width=3)
+        for x in range(int(rng.uniform(20, 90)), S, 110):       # butt joints
+            pd.line([(x, y - 26), (x, y)], fill=(60, 35, 15, 90), width=2)
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).polygon(hull, fill=255)
+    planks.putalpha(Image.fromarray(np.minimum(np.asarray(planks)[..., 3], np.asarray(mask))))
+    img.alpha_composite(planks)
+    # brass rubbing strake at the waterline edge of the copper
+    d.line([(20, 105), (468, 105)], fill=(205, 170, 80, 255), width=7)
+    # keel along the bottom, stern post and rudder
+    d.rectangle((126, keel_y - 6, 446, keel_y + 12), fill=_rgba(wdark), outline=OL, width=4)
+    d.line([(456, 0), (444, keel_y + 6)], fill=OL, width=16)
+    d.line([(456, 0), (444, keel_y + 6)], fill=_rgba(wdark), width=9)
+    rudder = [(462, 20), (500, 34), (494, keel_y), (446, keel_y + 8), (452, 20)]
+    d.polygon(rudder, fill=(80, 48, 22, 255), outline=OL, width=5)
+    for y in (70, 130, 190):                                     # rudder hinges
+        d.line([(446, y), (480, y + 4)], fill=(200, 165, 80, 255), width=6)
+    # barnacles and trailing weed
+    for _ in range(28):
+        x, y = rng.uniform(110, 430), rng.uniform(118, keel_y - 12)
+        r = rng.uniform(3, 7)
+        d.ellipse((x - r, y - r, x + r, y + r), fill=(215, 210, 190, 255), outline=(90, 85, 75, 255), width=2)
+    for _ in range(10):
+        x = rng.uniform(110, 420)
+        y0 = keel_y + 10
+        pts = [(x + math.sin(k * 0.8 + x) * 6, y0 + k * 9) for k in range(int(rng.uniform(4, 9)))]
+        d.line(pts, fill=(50, 120, 50, 235), width=6)
+    d.polygon(hull, outline=OL, width=OW)
+    return ceiling(finish(img, OUT))
 
 
 def net():
@@ -593,6 +844,46 @@ def ground(img):
     out = Image.new("RGBA", img.size, (0, 0, 0, 0))
     out.paste(img, (0, shift))
     return out
+
+
+def glow():
+    """Soft, bright radial glow with a few rays (white; tinted per reward)."""
+    size = 256
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+    dx, dy = xx - size / 2 + 0.5, yy - size / 2 + 0.5
+    r = np.hypot(dx, dy) / (size / 2)
+    ang = np.arctan2(dy, dx)
+    core = np.clip(1 - r, 0, 1) ** 2.2
+    rays = np.clip(1 - r, 0, 1) ** 1.5 * (0.5 + 0.5 * np.cos(ang * 8)) ** 6 * 0.6
+    a = np.clip(core + rays, 0, 1)
+    arr = np.zeros((size, size, 4), dtype=np.uint8)
+    arr[..., :3] = 255
+    arr[..., 3] = (a * 255).astype(np.uint8)
+    return Image.fromarray(arr, "RGBA")
+
+
+def soft():
+    """Plain soft white disc (light showing through wall openings)."""
+    size = 128
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+    r = np.hypot(xx - size / 2 + 0.5, yy - size / 2 + 0.5) / (size / 2)
+    a = np.clip(1 - r, 0, 1) ** 0.7
+    arr = np.zeros((size, size, 4), dtype=np.uint8)
+    arr[..., :3] = 255
+    arr[..., 3] = (a * 255).astype(np.uint8)
+    return Image.fromarray(arr, "RGBA")
+
+
+def halo():
+    """Soft glow ring (white; tinted red at runtime) behind obstacles."""
+    size = 128
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+    r = np.hypot(xx - size / 2 + 0.5, yy - size / 2 + 0.5) / (size / 2)
+    a = np.clip(1 - r, 0, 1) ** 1.2 * np.clip(r * 2.2, 0, 1)
+    arr = np.zeros((size, size, 4), dtype=np.uint8)
+    arr[..., :3] = 255
+    arr[..., 3] = (a * 255).astype(np.uint8)
+    return Image.fromarray(arr, "RGBA")
 
 
 def shadow():
@@ -750,54 +1041,188 @@ def _rgba_image(rgb, a):
 # Floor decorations (non-colliding scenery)
 # ---------------------------------------------------------------------------
 
-def weed_tuft(seed=0, palette=((40, 140, 50), (70, 170, 60), (30, 110, 60))):
+DECOR_OUT = 256
+
+
+def weed_tuft(seed=0, palette=((40, 140, 50), (70, 170, 60), (30, 110, 60)), blades=9, width=26):
     img, d = _canvas()
     rng = np.random.default_rng(seed)
-    for _ in range(9):
-        x0 = 256 + rng.uniform(-90, 90)
-        h = rng.uniform(250, 470)
-        bend = rng.uniform(-60, 60)
+    for _ in range(blades):
+        x0 = 256 + rng.uniform(-100, 100)
+        h = rng.uniform(220, 480)
+        bend = rng.uniform(-80, 80)
         col = palette[rng.integers(len(palette))]
         pts = []
         for i in range(12):
             t = i / 11
             pts.append((x0 + bend * t * t + math.sin(t * 5 + seed) * 12, 512 - h * t))
         for i in range(len(pts) - 1):
-            w = int(26 * (1 - i / 12) + 6)
+            w = int(width * (1 - i / 12) + 6)
             d.line([pts[i], pts[i + 1]], fill=OL, width=w + 6)
         for i in range(len(pts) - 1):
-            w = int(26 * (1 - i / 12) + 6)
+            w = int(width * (1 - i / 12) + 6)
             d.line([pts[i], pts[i + 1]], fill=_rgba(col), width=w)
-    return finish(img, 128)
+    return finish(ground(img), DECOR_OUT)
 
 
-def coral_tuft(seed=0, color=(240, 110, 120)):
+def sea_grass(seed=0, palette=((90, 170, 70), (60, 140, 60), (120, 180, 80))):
+    return weed_tuft(seed, palette, blades=26, width=9)
+
+
+def coral_tuft(seed=0, color=(240, 110, 120), depth=4, spread=0.45):
     img, d = _canvas()
     rng = np.random.default_rng(seed)
+    tip = _shade(color, 1.25)
 
     def branch(x, y, ang, length, width, depth):
         x2 = x + math.cos(ang) * length
         y2 = y - math.sin(ang) * length
         d.line([(x, y), (x2, y2)], fill=OL, width=int(width + 8))
         d.line([(x, y), (x2, y2)], fill=_rgba(color), width=int(width))
-        d.ellipse((x2 - width / 2, y2 - width / 2, x2 + width / 2, y2 + width / 2), fill=_rgba(color))
+        d.ellipse((x2 - width / 2, y2 - width / 2, x2 + width / 2, y2 + width / 2),
+                  fill=_rgba(tip if depth == 0 else color))
         if depth > 0:
-            for da in (-0.45, 0.4):
-                branch(x2, y2, ang + da + rng.uniform(-0.2, 0.2), length * 0.72, width * 0.72, depth - 1)
-    branch(256, 512, math.pi / 2 + rng.uniform(-0.2, 0.2), 150, 44, 4)
-    return finish(img, 128)
+            for da in (-spread, spread * 0.9):
+                branch(x2, y2, ang + da + rng.uniform(-0.25, 0.25), length * rng.uniform(0.65, 0.8),
+                       width * 0.72, depth - 1)
+    for k in range(rng.integers(1, 3)):
+        branch(256 + rng.uniform(-60, 60), 512, math.pi / 2 + rng.uniform(-0.3, 0.3), 140, 42, depth)
+    return finish(ground(img), DECOR_OUT)
+
+
+def sea_fan(seed=0, color=(200, 70, 150)):
+    """Gorgonian: a flat, lacy fan on a short stem."""
+    img, d = _canvas()
+    rng = np.random.default_rng(seed)
+    cx, base = 256, 500
+    fan = [(cx, base - 40)]
+    for i in range(25):
+        a = math.pi * (0.08 + 0.84 * i / 24)
+        r = 300 * rng.uniform(0.88, 1.0)
+        fan.append((cx + math.cos(a) * r * 0.95, base - 40 - math.sin(a) * r))
+    d.polygon(fan, fill=_rgba(color, 120))
+    # lattice: radiating branches plus cross links
+    for i in range(1, 25, 2):
+        x, y = fan[i]
+        d.line([(cx, base - 40), (x, y)], fill=_rgba(color), width=7)
+    for r in range(60, 300, 34):
+        pts = [(cx + math.cos(math.pi * (0.08 + 0.84 * j / 30)) * r * 0.95,
+                base - 40 - math.sin(math.pi * (0.08 + 0.84 * j / 30)) * r) for j in range(31)]
+        d.line(pts, fill=_rgba(_shade(color, 1.2)), width=4)
+    d.polygon(fan, outline=OL, width=5)
+    d.line([(cx, base - 40), (cx, 512)], fill=OL, width=24)
+    d.line([(cx, base - 40), (cx, 512)], fill=_rgba(_shade(color, 0.7)), width=14)
+    return finish(ground(img), DECOR_OUT)
+
+
+def brain_coral(seed=0, color=(200, 180, 110)):
+    img, d = _canvas()
+    bbox = (40, 250, 472, 520 + 250)
+    layer = radial_layer((S, S), bbox, _shade(color, 1.3), _shade(color, 0.6), hl=(-0.2, -0.6))
+    img.alpha_composite(layer)
+    # meandering grooves
+    rng = np.random.default_rng(seed)
+    for row in range(8):
+        y0 = 280 + row * 28
+        pts = []
+        for i in range(60):
+            x = 50 + i * 7
+            y = y0 + math.sin(i * 0.5 + rng.uniform(0, 0.3) + row) * 9
+            pts.append((x, y))
+        d.line(pts, fill=_rgba(_shade(color, 0.55)), width=5)
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).ellipse(bbox, fill=255)
+    a = np.minimum(np.asarray(img)[..., 3], np.asarray(mask))
+    img.putalpha(Image.fromarray(a))
+    d = ImageDraw.Draw(img)
+    d.chord(bbox, 180, 360, outline=OL, width=OW)
+    return finish(ground(img), DECOR_OUT)
+
+
+def tube_sponge(seed=0, color=(230, 120, 60)):
+    img, d = _canvas()
+    rng = np.random.default_rng(seed)
+    tubes = sorted([(rng.uniform(120, 390), rng.uniform(200, 440), rng.uniform(34, 52)) for _ in range(5)],
+                   key=lambda t: -t[1])
+    for x, h, w in tubes:
+        top = 512 - h
+        c = _shade(color, rng.uniform(0.85, 1.15))
+        d.rounded_rectangle((x - w, top, x + w, 520), radius=int(w), fill=_rgba(c), outline=OL, width=OW)
+        d.line([(x - w * 0.5, top + 30), (x - w * 0.5, 500)], fill=_rgba(_shade(c, 1.2)), width=6)
+        d.ellipse((x - w * 0.8, top + 4, x + w * 0.8, top + 30), fill=_rgba(_shade(c, 0.35)), outline=OL, width=4)
+    return finish(ground(img), DECOR_OUT)
+
+
+def anemone(seed=0, color=(255, 130, 170), stem=(200, 90, 60)):
+    img, d = _canvas()
+    rng = np.random.default_rng(seed)
+    cx = 256
+    d.rounded_rectangle((cx - 70, 330, cx + 70, 520), radius=40, fill=_rgba(stem), outline=OL, width=OW)
+    for k in range(26):
+        a = math.pi * (0.05 + 0.9 * k / 25) + rng.uniform(-0.05, 0.05)
+        L = rng.uniform(150, 240)
+        pts = []
+        for i in range(10):
+            t = i / 9
+            r = L * t
+            wig = math.sin(t * 4 + k) * 18 * t
+            pts.append((cx + math.cos(a) * (60 + r) * 0.9 + wig, 345 - math.sin(a) * (20 + r)))
+        d.line(pts, fill=OL, width=20)
+        d.line(pts, fill=_rgba(color), width=12)
+        x, y = pts[-1]
+        d.ellipse((x - 10, y - 10, x + 10, y + 10), fill=_rgba(_shade(color, 1.3)), outline=OL, width=3)
+    return finish(ground(img), DECOR_OUT)
+
+
+def kelp_tall(seed=0, color=(150, 120, 40)):
+    """A tall golden kelp stalk with alternating blades and gas bladders."""
+    img, d = _canvas()
+    rng = np.random.default_rng(seed)
+    for stalk in range(2):
+        x0 = 256 + (stalk - 0.5) * rng.uniform(50, 110)
+        pts = [(x0 + math.sin(t / 60 + stalk + seed) * 26, 512 - t) for t in range(0, 500, 20)]
+        d.line(pts, fill=OL, width=16)
+        d.line(pts, fill=_rgba(_shade(color, 0.8)), width=9)
+        for i, (x, y) in enumerate(pts[2::2]):
+            side = 1 if (i + stalk) % 2 else -1
+            L = rng.uniform(70, 120)
+            leaf = [(x, y), (x + side * L * 0.45, y - 62), (x + side * L, y - 78),
+                    (x + side * L * 0.8, y - 30), (x + side * L * 0.35, y - 4)]
+            d.polygon(leaf, fill=_rgba(_shade(color, rng.uniform(0.9, 1.25))), outline=OL, width=4)
+            d.ellipse((x - 9, y - 9, x + 9, y + 9), fill=_rgba(_shade(color, 1.35)), outline=OL, width=3)
+    return finish(ground(img), DECOR_OUT)
 
 
 def rock_small(seed=0):
-    return boulder(seed).resize((128, 128), Image.LANCZOS)
+    return ground(boulder(seed)).resize((DECOR_OUT, DECOR_OUT), Image.LANCZOS)
 
 
 DECOR_DRAW = {
     "weed0": lambda: weed_tuft(1),
     "weed1": lambda: weed_tuft(2, ((150, 120, 40), (120, 140, 40), (90, 120, 30))),
+    "weed2": lambda: weed_tuft(6, ((60, 90, 70), (80, 110, 80), (50, 80, 90))),
+    "weed3": lambda: weed_tuft(8, ((40, 160, 120), (60, 180, 100), (30, 130, 110)), blades=12),
+    "grass0": lambda: sea_grass(10),
+    "grass1": lambda: sea_grass(11, ((140, 150, 70), (110, 130, 60), (160, 160, 90))),
     "coral0": lambda: coral_tuft(3, (240, 110, 120)),
     "coral1": lambda: coral_tuft(4, (170, 120, 230)),
     "coral2": lambda: coral_tuft(5, (250, 190, 60)),
+    "coral3": lambda: coral_tuft(13, (255, 120, 60), depth=5, spread=0.35),
+    "coral4": lambda: coral_tuft(14, (220, 60, 70), depth=3, spread=0.6),
+    "coral5": lambda: coral_tuft(15, (220, 235, 250), depth=5, spread=0.5),
+    "fan0": lambda: sea_fan(16, (200, 70, 150)),
+    "fan1": lambda: sea_fan(17, (240, 160, 60)),
+    "fan2": lambda: sea_fan(18, (150, 110, 200)),
+    "brain0": lambda: brain_coral(19, (200, 180, 110)),
+    "brain1": lambda: brain_coral(20, (150, 200, 120)),
+    "sponge0": lambda: tube_sponge(21, (230, 120, 60)),
+    "sponge1": lambda: tube_sponge(22, (170, 90, 200)),
+    "sponge2": lambda: tube_sponge(23, (220, 200, 90)),
+    "anemone0": lambda: anemone(24, (255, 130, 170)),
+    "anemone1": lambda: anemone(25, (120, 230, 200), (60, 120, 140)),
+    "anemone2": lambda: anemone(26, (255, 200, 90), (200, 80, 60)),
+    "kelp0": lambda: kelp_tall(27, (150, 120, 40)),
+    "kelp1": lambda: kelp_tall(28, (90, 140, 50)),
     "rock0": lambda: rock_small(7),
     "rock1": lambda: rock_small(9),
 }
@@ -811,6 +1236,9 @@ OBSTACLE_DRAW = {
     "mine": lambda: [mine()],
     "neptune": lambda: [neptune()],
     "net": lambda: [net()],
+    "iceberg": lambda: [iceberg()],
+    "hook": lambda: [hook()],
+    "galleon": lambda: [galleon()],
     "octopus": lambda: [octopus_frame(i / 6) for i in range(6)],
     "jellyfish": lambda: [jellyfish_frame(i / 6) for i in range(6)],
 }

@@ -15,6 +15,10 @@ class SoundManager:
         self.current = None       # (stage, sound)
         self.fading = []          # sounds fading out
         self.fade_in_time = 2.5
+        # ShowBase limits the music manager to one sound at a time, which cuts
+        # the old tune off instantly; allow overlap so tunes can crossfade.
+        if base.musicManager:
+            base.musicManager.setConcurrentSoundLimit(4)
         self._apply_enabled()
 
     # -- effects -----------------------------------------------------------
@@ -49,22 +53,28 @@ class SoundManager:
 
     @staticmethod
     def stage_index(stage):
-        """Stages beyond the last generated one alternate between the top two."""
+        """Stages beyond the last generated one cycle through the final four."""
         if stage < MUSIC_STAGES:
             return stage
-        return MUSIC_STAGES - 2 + (stage - MUSIC_STAGES) % 2
+        return MUSIC_STAGES - 4 + (stage - MUSIC_STAGES) % 4
 
-    def play_stage(self, stage, fade=2.5):
+    def play_stage(self, stage, fade=3.0):
+        """Crossfade to the tune for `stage`: the old one fades out while the
+        new one fades in over `fade` seconds."""
         idx, snd = self._track(stage)
         if self.current and self.current[0] == idx:
             return
         if self.current:
             self.fading.append(self.current[1])
-        snd.setVolume(0.0 if fade > 0 else config.MUSIC_VOLUME)
-        snd.setTime(0)
-        snd.play()
+        if snd in self.fading:            # coming back to a tune that's fading out
+            self.fading.remove(snd)
+        else:
+            snd.setVolume(0.0 if fade > 0 else config.MUSIC_VOLUME)
+            snd.setTime(0)
+            snd.play()
         self.current = (idx, snd)
         self.fade_in_time = max(fade, 0.01)
+        self._track(stage + 1)            # preload the next tune so it starts without a gap
 
     def stop_music(self):
         if self.current:

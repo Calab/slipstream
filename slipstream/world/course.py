@@ -9,6 +9,7 @@ from panda3d.core import ColorBlendAttrib, TextNode, TransparencyAttrib
 from .. import config
 from .common import card, flat_card
 from .obstacles import Obstacle, Reward, obstacle_height
+from .trench import STRAIGHT
 from .walls import WallFactory
 
 REWARD_WEIGHTS = {"pearl": 0.45, "shell": 0.3, "starfish": 0.18, "gem": 0.07}
@@ -19,8 +20,9 @@ def lerp(a, b, t):
 
 
 class Course:
-    def __init__(self, parent, res, theme, seed=None):
+    def __init__(self, parent, res, theme, seed=None, trench=None):
         self.parent = parent.attachNewNode("course")
+        self.trench = trench or STRAIGHT
         self.res = res
         self.theme = theme
         self.rng = random.Random(seed)
@@ -41,7 +43,8 @@ class Course:
 
     def _segment(self, d):
         rng = self.rng
-        wall = self.factory.create(self.parent, self.next_wall_y, d, self.anchors, self.prev_y)
+        wall = self.factory.create(self.parent, self.next_wall_y, d, self.anchors, self.prev_y,
+                                   x_range=self.trench.bounds(self.next_wall_y, 3.0))
         self.prev_y = wall.back
         self.anchors = [(o[0], o[1]) for o in wall.openings]
         self.objects.append(wall)
@@ -59,28 +62,30 @@ class Course:
         y = wall.back + rng.uniform(9, 16)
         while y < next_y - 10:
             if rng.random() < lerp(0.55, 0.95, d):
-                xs = [self._obstacle_x(wall)]
+                xs = [self._obstacle_x(wall, y)]
                 if rng.random() < lerp(0.0, 0.5, d):
-                    x2 = self._obstacle_x(wall)
+                    x2 = self._obstacle_x(wall, y)
                     if abs(x2 - xs[0]) > 8:
                         xs.append(x2)
                 for ox in xs:
                     name = rng.choice(self.theme.obstacles)
                     self.objects.append(Obstacle(self.parent, self.res, name, ox, y,
-                                                 obstacle_height(name, rng), rng))
+                                                 obstacle_height(name, rng), rng,
+                                                 bounds=self.trench.bounds(y)))
             elif rng.random() < 0.7:
-                self._reward(rng.uniform(-config.HALF_W + 3, config.HALF_W - 3), y,
+                self._reward(rng.uniform(*self.trench.bounds(y, 3.0)), y,
                              rng.uniform(1.5, config.WORLD_H - 2.5))
             y += rng.uniform(lerp(18, 9, d), lerp(30, 16, d))
         self.next_wall_y = next_y
 
-    def _obstacle_x(self, wall):
+    def _obstacle_x(self, wall, y):
         rng = self.rng
+        lo, hi = self.trench.bounds(y, 2.5)
         if rng.random() < 0.5:
-            ox = rng.uniform(-config.HALF_W + 3, config.HALF_W - 3)
+            ox = rng.uniform(lo, hi)
         else:  # near where the player is likely to swim
             ox = rng.choice(wall.openings)[0] + rng.uniform(-3, 3)
-        return max(-config.HALF_W + 2.5, min(config.HALF_W - 2.5, ox))
+        return max(lo, min(hi, ox))
 
     def _reward(self, x, y, z):
         names = list(REWARD_WEIGHTS)

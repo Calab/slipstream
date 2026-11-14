@@ -10,7 +10,8 @@ from .common import button, fmt_time, PANEL, ACCENT, TEXT, MUTED
 class StartMenu:
     def __init__(self, base, app):
         self.app = app
-        self.frame = DirectFrame(parent=base.aspect2d, frameColor=PANEL,
+        # more see-through than the other panels so the scene shows behind it
+        self.frame = DirectFrame(parent=base.aspect2d, frameColor=PANEL[:3] + (0.55,),
                                  frameSize=(-0.78, 0.78, -0.80, 0.56), pos=(0, 0, -0.08))
         OnscreenText(parent=self.frame, text="SLIPSTREAM", pos=(0, 0.42), scale=0.13, fg=ACCENT,
                      shadow=(0, 0, 0, 0.8))
@@ -56,7 +57,7 @@ class StartMenu:
             self.record.setText("Best time:  --")
         self.b_theme["text"] = "Theme  [T]"
         self.b_sound["text"] = f"Sound: {'On' if sound_on else 'Off'}  [S]"
-        self.b_touch["text"] = f"Touch Pad: {'On' if touch_on else 'Off'}  [B]"
+        self.b_touch["text"] = f"Touch Buttons: {'On' if touch_on else 'Off'}  [B]"
         self.b_aim["text"] = f"Aim Helper: {'On' if aim_on else 'Off'}  [A]"
 
     def update(self, dt):
@@ -78,7 +79,7 @@ class GameOverPanel:
                                  frameSize=(-0.7, 0.7, -0.5, 0.45), pos=(0, 0, -0.08))
         OnscreenText(parent=self.frame, text="GAME OVER", pos=(0, 0.3), scale=0.12, fg=(1, 0.45, 0.35, 1),
                      shadow=(0, 0, 0, 0.8))
-        self.stats = OnscreenText(parent=self.frame, text="", pos=(0, 0.16), scale=0.055, fg=TEXT,
+        self.stats = OnscreenText(parent=self.frame, text="", pos=(0, 0.13), scale=0.085, fg=TEXT,
                                   mayChange=True)
         self.best = OnscreenText(parent=self.frame, text="", pos=(0, 0.0), scale=0.055, fg=ACCENT,
                                  mayChange=True)
@@ -100,7 +101,7 @@ class PausePanel:
         self.frame = DirectFrame(parent=base.aspect2d, frameColor=PANEL,
                                  frameSize=(-0.55, 0.55, -0.32, 0.3))
         OnscreenText(parent=self.frame, text="PAUSED", pos=(0, 0.15), scale=0.1, fg=ACCENT)
-        button(self.frame, "Resume  [P]", app.toggle_pause, (0, 0, -0.02), width=0.8)
+        button(self.frame, "Resume  [P / Space]", app.toggle_pause, (0, 0, -0.02), width=0.8)
         button(self.frame, "Menu  [Esc]", app.to_menu, (0, 0, -0.17), width=0.8)
         self.hide()
 

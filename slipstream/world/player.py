@@ -6,6 +6,7 @@ from panda3d.core import TransparencyAttrib
 
 from .. import config
 from .common import card, Shadow
+from .trench import STRAIGHT
 
 
 class Player:
@@ -22,7 +23,11 @@ class Player:
         self.sprite.setDepthTest(False)
         self.sprite.setFogOff()
         self.shadow = Shadow(parent, res.texture("fx", "shadow.png"), 2.1)
+        self.trench = STRAIGHT
         self.reset()
+
+    def set_trench(self, trench):
+        self.trench = trench
 
     def reset(self):
         self.x, self.y, self.z = 0.0, 0.0, config.WORLD_H * 0.45
@@ -53,12 +58,14 @@ class Player:
         self.y += forward_speed * dt
 
         r = config.FISH_RADIUS
-        lim = config.HALF_W - r - 0.4
-        if abs(self.x) > lim:
-            self.x = math.copysign(lim, self.x)
-            if self.vx * self.x > 0:
-                self.vx = -self.vx * config.SIDE_BOUNCE - math.copysign(1.5, self.x)
-                events.append("side")
+        # side cliffs (they drift, so they can also push a fish that's not moving)
+        lo, hi = self.trench.bounds(self.y, r + 0.4)
+        for side, limit in ((1, hi), (-1, lo)):
+            if (self.x - limit) * side > 0:
+                self.x = limit
+                if self.vx * side > -1.0:
+                    self.vx = -side * (abs(self.vx) * config.SIDE_BOUNCE + 1.5)
+                    events.append("side")
         floor = r + 0.15
         if self.z < floor:
             self.z = floor

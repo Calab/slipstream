@@ -17,6 +17,8 @@ pip install -r requirements.txt
 python main.py                     # --fullscreen, --width/--height, --fps
 ```
 
+The window reopens at the size and position you last left it.
+
 The first launch takes a few seconds to generate assets into `./assets`.
 `python tools/generate_assets.py --force` rebuilds them.
 
@@ -35,18 +37,23 @@ Works on Linux, Windows and macOS (Python 3.9+). Saves and best times are stored
 | S | Sound on/off | |
 | R | Reset best time for the theme | |
 | A | Aim helper on/off | |
-| B | On-screen touch pad on/off | On-screen touch pad on/off |
+| B | Touch buttons on/off | Touch buttons on/off |
 | P | | Pause |
 | Q / Esc | Quit | Esc: back to the menu |
 
-Every start-screen key also has an on-screen button. The touch pad (arrows plus A/Z)
+Every start-screen key also has an on-screen button. The touch buttons (on-screen arrows plus A/Z)
 is meant for tablets and phones, and also works with a mouse.
 
 ## Gameplay
 
 * When you stop swimming the fish slowly sinks. It bounces off the sea floor in a
-  puff of bubbles and bounces off the side cliffs. You can't swim around the ends of
-  a wall or over its top.
+  puff of bubbles. You can't swim around the ends of a wall or over its top.
+* The side cliffs drift in and out by up to 9.6 units each as you go (at its
+  narrowest the trench is 60% of its full width), so it narrows and widens and
+  the rock can creep up on a fish sitting near one side. Scraping a cliff (or
+  being pushed by one) costs 5 health, at most once a second.
+* Openings glow softly around their edges and show bright water through them,
+  so they stand out even from far away.
 * Each wall has 1–3 irregular openings, anywhere from the sea floor (an arch)
   up to just under the surface. Every wall has an opening you can reach in time
   from any opening of the previous wall. Hitting a wall or an obstacle splats you
@@ -61,7 +68,9 @@ is meant for tablets and phones, and also works with a mouse.
   between the fish and the ring crowd together as the wall gets closer.
 * Obstacles get more frequent over time. Rows come closer together, and later
   on two obstacles can appear side by side.
-* The music moves up a stage every 10 walls/obstacles passed.
+* Each theme has 8 different nautical tunes, alternating jigs and hornpipes.
+  The music moves to the next, busier and faster tune every 10 walls/obstacles
+  passed. After the eighth it keeps cycling through the last four.
 * A glowing gate marks where your **last run** ended (gold) and how far your
   **best** run got (green). A banner shows when you beat your best time.
 * Forward speed and difficulty (narrower openings, closer walls) ramp up over time.
@@ -70,9 +79,9 @@ is meant for tablets and phones, and also works with a mouse.
 
 | Theme | Player | Walls | Obstacles | Boat |
 |---|---|---|---|---|
-| Coral Reef | Clownfish | coral, seaweed | chest, boulder, octopus, Neptune, jellyfish | sailboat |
-| Shipwreck Deep | Submarine | sunken hull planks, rock | mine, anchor, chest, barrel, boulder, octopus | warship |
-| Kelp Forest | Mermaid | kelp, rock | net, jellyfish, octopus, boulder, Neptune, anchor | trawler |
+| Coral Reef | Clownfish | coral, seaweed | chest, boulder, octopus, Neptune, jellyfish, fish hook | sailboat |
+| Shipwreck Deep | Submarine | sunken hull planks, rock | mine, anchor, chest, barrel, boulder, octopus, iceberg | warship |
+| Kelp Forest | Mermaid | kelp, rock | net, jellyfish, octopus, boulder, Neptune, anchor, galleon hull | trawler |
 
 ## Using your own art and sounds
 
@@ -103,13 +112,15 @@ slipstream/
     audio.py                synthesised SFX and nautical music
   world/
     environment.py          floor, cliffs, surface, parallax background, fog, light rays
+    terrain.py              bumpy floor and cliff meshes
+    trench.py               how far each side cliff has drifted in at any distance
     player.py               player movement, sinking, bounce, animation, shadow
     walls.py                walls with irregular openings (mask = visuals = collision)
     obstacles.py            obstacles (some moving) and rewards
     course.py               spawning/despawning, last/best distance markers
     effects.py              bubbles
     aim.py                  aim helper (target ring + distance dots)
-  ui/                       HUD, surface band (waves + boat), menus, touch pad
+  ui/                       HUD, surface band (waves + boat), menus, touch buttons
   fonts/                    Some Time Later font + licence
 tools/generate_assets.py    pre-generate / rebuild assets
 custom/                     your replacement art & sounds (overrides assets/)
@@ -125,6 +136,6 @@ by Fredrick R. Brennan, under the SIL Open Font License 1.1
 
 Panda3D has experimental Android support (`build_apps` with the Android
 platform tag in Panda3D 1.11). The game already includes the pieces it would
-need: the touch pad, assets that are generated rather than bundled, and a
+need: the touch buttons, assets that are generated rather than bundled, and a
 writable-directory fallback for the asset cache. A packaging setup would still
 have to be added.

@@ -3,6 +3,7 @@
 from panda3d.core import CardMaker, TransparencyAttrib, NodePath
 
 from .. import config
+from .terrain import floor_height
 
 
 def card(parent, tex, w, h, anchor="center", name="card", transparency=TransparencyAttrib.M_alpha):
@@ -10,6 +11,8 @@ def card(parent, tex, w, h, anchor="center", name="card", transparency=Transpare
     cm = CardMaker(name)
     if anchor == "bottom":
         cm.setFrame(-w / 2, w / 2, 0, h)
+    elif anchor == "top":            # hangs down from its origin
+        cm.setFrame(-w / 2, w / 2, -h, 0)
     else:
         cm.setFrame(-w / 2, w / 2, -h / 2, h / 2)
     np_ = parent.attachNewNode(cm.generate())
@@ -48,7 +51,7 @@ class Shadow:
     def update(self, x, y, z):
         h = max(0.0, min(1.0, z / config.WORLD_H))
         s = self.base_size * (1.25 - 0.85 * h)
-        self.np.setPos(x, y, 0.04)
+        self.np.setPos(x, y, float(floor_height(x, y)) + 0.08)   # rests on the dunes
         self.np.setScale(s, s * 0.75, 1)
         self.np.setColor(0, 0, 0, 0.8 * (1.0 - 0.5 * h))
 

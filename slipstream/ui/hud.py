@@ -16,7 +16,7 @@ class HUD:
         self.root = base.aspect2d.attachNewNode("hud")
         self.bar = DirectFrame(parent=base.a2dTopCenter, frameColor=(0.0, 0.04, 0.09, 0.85),
                                frameSize=(-4, 4, -BAR_H, 0))
-        self.bar.setBin("fixed", -10)
+        self.bar.setBin("background", 0)     # drawn first, behind all HUD items
 
         self.time = OnscreenText(parent=base.a2dTopLeft, text="", pos=(0.05, -0.088), scale=0.075,
                                  fg=TEXT, align=TextNode.ALeft, mayChange=True, shadow=(0, 0, 0, 0.6))
@@ -28,14 +28,22 @@ class HUD:
         self.last = OnscreenText(parent=base.a2dTopRight, text="", pos=(-0.05, -0.115), scale=0.045,
                                  fg=MUTED, align=TextNode.ARight, mayChange=True)
 
-        # health bar
-        self.hp_label = OnscreenText(parent=base.a2dTopCenter, text="HEALTH", pos=(-0.42, -0.085),
+        # health bar: placed by layout() in the space between WALLS and BEST,
+        # shrinking on narrow windows so nothing overlaps
+        self.hp_group = base.a2dTopCenter.attachNewNode("health")
+        self.hp_bar = self.hp_group.attachNewNode("health-bar")     # scaled in x to fit
+        self.hp_group.setBin("fixed", 10)    # always drawn on top of the dark top bar
+        self.hp_label = OnscreenText(parent=self.hp_group, text="HEALTH", pos=(-0.42, -0.085),
                                      scale=0.055, fg=MUTED, align=TextNode.ARight)
-        self.hp_bg = DirectFrame(parent=base.a2dTopCenter, frameColor=(0.1, 0.1, 0.12, 0.9),
+        # outline marking the full (100%) size of the bar; the dark background
+        # drawn on top of it leaves just a thin light border showing
+        self.hp_outline = DirectFrame(parent=self.hp_bar, frameColor=(0.85, 0.92, 1.0, 0.95),
+                                      frameSize=(-0.407, 0.407, -0.102, -0.038))
+        self.hp_bg = DirectFrame(parent=self.hp_bar, frameColor=(0.1, 0.1, 0.12, 0.9),
                                  frameSize=(-0.4, 0.4, -0.095, -0.045))
-        self.hp_fill = DirectFrame(parent=base.a2dTopCenter, frameColor=(0.2, 0.9, 0.35, 1),
+        self.hp_fill = DirectFrame(parent=self.hp_bar, frameColor=(0.2, 0.9, 0.35, 1),
                                    frameSize=(0, 0.79, -0.09, -0.05), pos=(-0.395, 0, 0))
-        self.hp_text = OnscreenText(parent=base.a2dTopCenter, text="", pos=(0, -0.083), scale=0.045,
+        self.hp_text = OnscreenText(parent=self.hp_group, text="", pos=(0, -0.083), scale=0.045,
                                     fg=(1, 1, 1, 1), mayChange=True, shadow=(0, 0, 0, 1))
 
         # transient elements
@@ -48,7 +56,7 @@ class HUD:
         self.flash.setTransparency(TransparencyAttrib.M_alpha)
         self.flash.setBin("fixed", 100)
         self.flash_t = 0.0
-        self.nodes = [self.bar, self.time,self.walls, self.best, self.last, self.hp_label, self.hp_bg,
+        self.nodes = [self.bar, self.time,self.walls, self.best, self.last, self.hp_label, self.hp_outline, self.hp_bg,
                       self.hp_fill, self.hp_text]
         self.hide()
 
@@ -74,6 +82,31 @@ class HUD:
         col = (0.2, 0.9, 0.35, 1) if f > 0.5 else (0.95, 0.8, 0.2, 1) if f > 0.25 else (1, 0.25, 0.2, 1)
         self.hp_fill["frameColor"] = col
         self.hp_text.setText(f"{int(round(health))}")
+        self.layout()
+
+    def layout(self):
+        """Fit the health bar between the WALLS counter and the BEST time."""
+        def width(t, scale):
+            # an empty TextNode reports a garbage width, so treat it as zero
+            return t.textNode.getWidth() * scale if t.textNode.getText() else 0.0
+        a = self.base.getAspectRatio()
+        walls_right = -a + 0.55 + width(self.walls, 0.075)
+        best_left = a - 0.05 - max(width(self.best, 0.064), width(self.last, 0.045))
+        label_w = width(self.hp_label, 0.055) + 0.03
+        gap = 0.07
+        left, right = walls_right + gap, best_left - gap
+        show_label = right - left - label_w >= 0.35
+        if show_label:
+            left += label_w
+        width = max(0.2, min(0.8, right - left))
+        center = (left + right) / 2
+        self.hp_group.setX(center)
+        self.hp_bar.setSx(width / 0.8)
+        self.hp_label.setX(-width / 2 - 0.02)
+        if show_label:
+            self.hp_label.show()
+        else:
+            self.hp_label.hide()
 
     def show_banner(self, text, color=ACCENT, duration=2.5):
         self.banner.setText(text)
