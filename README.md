@@ -124,11 +124,14 @@ slipstream/
   ui/                       HUD, surface band (waves + boat), menus, touch buttons
   fonts/                    Some Time Later font + licence
 tools/generate_assets.py    pre-generate / rebuild assets
+tools/build_docs.py         rebuild docs/architecture.odt (diagrams + text)
 tools/build_binary.py       build a single-file executable (PyInstaller)
 tools/build_windows.bat     one-step Windows build (uses .win_venv, builds the .exe)
 tools/build_linux.sh        one-step Linux build
 tools/slipstream.spec       PyInstaller settings used by build_binary.py
 custom/                     your replacement art & sounds (overrides assets/)
+docs/architecture.md        diagrams of how the game works (also as .odt,
+                            built by tools/build_docs.py)
 ```
 
 ## Credits

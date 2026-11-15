@@ -14,6 +14,7 @@
 !/slipstream
 !/tools
 !/custom
+!/docs
 !/.gitattributes
 
 __pycache__/
