@@ -2,6 +2,22 @@
 
 Everything is drawn on a 512px canvas and downsampled for anti-aliasing.
 The player sprites are drawn from *behind* (the camera follows the player).
+
+Conventions used throughout:
+* Pixel coordinates on the S x S canvas: (0, 0) is the top-left corner,
+  x grows to the right and y grows *downwards*; (256, 256) is the centre.
+* Shapes are drawn with a dark outline (OL, OW wide) for a cartoon look.
+  Thick curves are drawn twice: first wide in the outline colour, then
+  narrower in the fill colour on top, leaving an outline either side.
+* Shading comes from radial_layer() (a gradient-filled ellipse) composited
+  under the outlines.
+* Animated sprites take a `phase` from 0 to 1 (one full cycle) and are
+  called once per frame, e.g. phase = 0, 1/8, 2/8 ... for 8 frames; sin(2*pi
+  *phase) then loops smoothly.
+* Effect textures (glow, halo, aim ring...) are white so the game can tint
+  them any colour at runtime.
+* Each drawing function returns a PIL RGBA image; the *_DRAW tables at the
+  bottom map asset names to these functions (used by assetgen/__init__.py).
 """
 
 import math
@@ -11,26 +27,30 @@ from PIL import Image, ImageDraw
 
 from .common import radial_layer, glow_layer, finish, periodic_noise
 
-S = 512
-OUT = 256
+S = 512                       # drawing canvas size (pixels)
+OUT = 256                     # saved sprite size (pixels)
 OL = (18, 22, 34, 255)        # outline colour
 OW = 7                        # outline width (at 512px)
 
 
 def _canvas(w=S, h=S):
+    """A transparent image and a pen (ImageDraw) to draw on it."""
     img = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     return img, ImageDraw.Draw(img)
 
 
 def _rgba(c, a=255):
+    """(r, g, b[, ...]) -> integer (r, g, b, a) for Pillow."""
     return tuple(int(v) for v in c[:3]) + (a,)
 
 
 def _shade(c, k):
+    """Colour c made darker (k < 1) or lighter (k > 1)."""
     return tuple(int(max(0, min(255, v * k))) for v in c[:3])
 
 
 def _ellipse_points(cx, cy, rx, ry, ang, n=40):
+    """n points around an ellipse centred at (cx, cy), rotated by ang radians."""
     ca, sa = math.cos(ang), math.sin(ang)
     pts = []
     for i in range(n):
@@ -44,6 +64,7 @@ def _ellipse_points(cx, cy, rx, ry, ang, n=40):
 # Player: fish seen from behind
 # ---------------------------------------------------------------------------
 
+# colours and body width/height (pixels) for the fish players
 FISH_STYLES = {
     "fish_clown": dict(body=(255, 125, 25), dark=(190, 60, 5), light=(255, 190, 110),
                        fin=(255, 150, 60), tail=(255, 140, 40), band=(250, 250, 250),
@@ -55,12 +76,13 @@ FISH_STYLES = {
 
 
 def fish_frame(style_name, phase):
+    """One frame of a fish swimming away from the camera: tail swishing, fins flapping."""
     st = FISH_STYLES[style_name]
     img, d = _canvas()
     cx, cy = S / 2, S / 2 + 6
     bw, bh = st["bw"], st["bh"]
-    sway = math.sin(2 * math.pi * phase)
-    flap = math.sin(2 * math.pi * phase + 1.3)
+    sway = math.sin(2 * math.pi * phase)          # -1..1: tail side to side
+    flap = math.sin(2 * math.pi * phase + 1.3)    # -1..1: pectoral fins (slightly out of step)
     fin, tail = _rgba(st["fin"]), _rgba(st["tail"])
 
     # dorsal fin (sticks up above the body, sways opposite to the tail)
@@ -227,6 +249,7 @@ def mermaid_frame(phase):
 
 
 def sub_frame(phase):
+    """One frame of the yellow submarine from behind, propeller turning."""
     img, d = _canvas()
     cx, cy = S / 2, S / 2 + 20
     yellow, ydark, ylight = (250, 200, 30), (170, 110, 10), (255, 240, 150)
@@ -318,6 +341,7 @@ def chest():
 
 
 def boulder(seed=4):
+    """A lumpy mossy rock (outline randomised by seed)."""
     img, _ = _canvas()
     rng = np.random.default_rng(seed)
     pts = []
@@ -343,6 +367,7 @@ def boulder(seed=4):
 
 
 def anchor():
+    """An iron ship's anchor with a bit of chain."""
     img, d = _canvas()
     iron = (95, 100, 110, 255)
     d.ellipse((216, 40, 296, 120), outline=OL, width=34)
@@ -362,6 +387,7 @@ def anchor():
 
 
 def barrel():
+    """A wooden barrel with iron hoops."""
     img, d = _canvas()
     wood, dark = (150, 95, 45), (95, 55, 25)
     img.alpha_composite(radial_layer((S, S), (110, 60, 402, 460), (190, 130, 70), dark, hl=(-0.2, 0)))
@@ -375,6 +401,7 @@ def barrel():
 
 
 def mine():
+    """A spiked naval mine (its chain is added in the game, see Obstacle.tether)."""
     img, d = _canvas()
     cx, cy, R = 256, 236, 130
     for k in range(12):
@@ -390,6 +417,7 @@ def mine():
 
 
 def octopus_frame(phase):
+    """One frame of an octopus with eight wiggling arms."""
     img, d = _canvas()
     body, dark, light = (170, 60, 160), (95, 25, 95), (235, 140, 225)
     cx, cy = 256, 190
@@ -402,6 +430,7 @@ def octopus_frame(phase):
             r = 70 + 230 * t
             a = base_a + wig / 300
             pts.append((cx + math.cos(a) * r * 0.85 + wig, cy + 30 + math.sin(a) * r))
+        # arms taper towards the tips; outline pass first, then the colour pass
         for i in range(len(pts) - 1):
             w = int(44 * (1 - i / 14) + 8)
             d.line([pts[i], pts[i + 1]], fill=OL, width=w + 8)
@@ -422,6 +451,7 @@ def octopus_frame(phase):
 
 
 def jellyfish_frame(phase):
+    """One frame of a jellyfish: pulsing bell and trailing tentacles."""
     img, d = _canvas()
     cx, cy = 256, 170
     pulse = 1 + 0.08 * math.sin(2 * math.pi * phase)
@@ -458,6 +488,7 @@ def _shaded_poly(img, pts, light, dark, hl=(-0.3, -0.4)):
 
 
 def _limb(d, pts, width, color):
+    """A thick outlined line with rounded joints (arms, for Neptune)."""
     d.line(pts, fill=OL, width=width + 10, joint="curve")
     d.line(pts, fill=_rgba(color), width=width, joint="curve")
     for x, y in pts:
@@ -714,6 +745,7 @@ def galleon():
 
 
 def net():
+    """A sagging fishing net with orange floats on top and weights below."""
     img, d = _canvas()
     rope = (215, 200, 160, 255)
     x0, x1, y0, y1 = 40, 472, 70, 470
@@ -743,6 +775,7 @@ def net():
 # ---------------------------------------------------------------------------
 
 def pearl():
+    """Reward: a glowing pearl."""
     img, d = _canvas()
     img.alpha_composite(glow_layer((S, S), (256, 256), 250, (255, 240, 255), 0.9))
     img.alpha_composite(radial_layer((S, S), (126, 126, 386, 386), (255, 255, 255), (200, 170, 210),
@@ -753,6 +786,7 @@ def pearl():
 
 
 def shell():
+    """Reward: a scallop shell."""
     img, d = _canvas()
     img.alpha_composite(glow_layer((S, S), (256, 256), 250, (255, 220, 200), 0.85))
     pts = [(256, 420)]
@@ -769,6 +803,7 @@ def shell():
 
 
 def starfish():
+    """Reward: a five-armed starfish."""
     img, d = _canvas()
     img.alpha_composite(glow_layer((S, S), (256, 256), 250, (255, 250, 170), 0.85))
     pts = []
@@ -786,6 +821,7 @@ def starfish():
 
 
 def gem():
+    """Reward: a cut gemstone (the most valuable)."""
     img, d = _canvas()
     img.alpha_composite(glow_layer((S, S), (256, 256), 255, (160, 255, 255), 1.0))
     top = [(146, 210), (196, 130), (316, 130), (366, 210)]
@@ -802,6 +838,7 @@ def gem():
 # ---------------------------------------------------------------------------
 
 def bubble():
+    """A see-through bubble with a highlight."""
     img, d = _canvas(128, 128)
     d.ellipse((8, 8, 120, 120), fill=(200, 240, 255, 50), outline=(235, 250, 255, 230), width=7)
     d.ellipse((34, 28, 58, 50), fill=(255, 255, 255, 230))
@@ -809,6 +846,7 @@ def bubble():
 
 
 def arrow():
+    """Triangle arrow for the touch buttons (pointing up; rotated in the game)."""
     img, d = _canvas(128, 128)
     d.polygon([(64, 14), (118, 104), (10, 104)], fill=(255, 255, 255, 235), outline=(0, 0, 0, 160), width=5)
     return img.resize((64, 64), Image.LANCZOS)
@@ -828,6 +866,7 @@ def aim_ring():
 
 
 def dot():
+    """A small white dot (the aim helper's trail)."""
     img, d = _canvas(64, 64)
     d.ellipse((6, 6, 58, 58), fill=(255, 255, 255, 255), outline=(0, 0, 0, 140), width=5)
     return img.resize((32, 32), Image.LANCZOS)
@@ -898,6 +937,7 @@ def app_icon():
 
 
 def shadow():
+    """Soft black blob for shadows on the sea floor."""
     size = 128
     yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
     r = np.hypot(xx - size / 2 + 0.5, yy - size / 2 + 0.5) / (size / 2)
@@ -924,6 +964,7 @@ def marker(color):
 # ---------------------------------------------------------------------------
 
 def sailboat():
+    """Side view of a sailboat (Coral Reef surface band)."""
     img, d = _canvas(S, 320)
     d.line([(250, 30), (250, 240)], fill=(90, 60, 30, 255), width=10)
     d.polygon([(258, 40), (258, 225), (420, 225)], fill=(250, 250, 245, 255), outline=OL, width=6)
@@ -936,6 +977,7 @@ def sailboat():
 
 
 def warship():
+    """Side view of a grey warship (Shipwreck surface band)."""
     img, d = _canvas(S, 320)
     grey, dark = (130, 138, 150, 255), (80, 86, 96, 255)
     d.polygon([(20, 220), (492, 220), (440, 300), (70, 300)], fill=grey, outline=OL, width=6)
@@ -953,6 +995,7 @@ def warship():
 
 
 def trawler():
+    """Side view of a fishing trawler (Kelp Forest surface band)."""
     img, d = _canvas(S, 320)
     red, white = (200, 50, 40, 255), (240, 240, 235, 255)
     d.line([(150, 40), (150, 225)], fill=(60, 60, 60, 255), width=9)
@@ -978,6 +1021,8 @@ def wave_layer(color, seed, amp=10, w=512, h=64):
     """Rolling wave strip: water colour below a periodic crest line, foam on top."""
     rng = np.random.default_rng(seed)
     x = np.arange(w) / w
+    # crest height across the strip: a few sine waves with whole-number
+    # frequencies (k waves per strip) so the strip tiles seamlessly
     crest = np.zeros(w)
     for k in (3, 5, 8, 13):
         crest += np.sin(2 * np.pi * (k * x + rng.uniform())) / k
@@ -994,6 +1039,7 @@ def wave_layer(color, seed, amp=10, w=512, h=64):
 
 
 def sky_gradient(top, bottom, h=64):
+    """Vertical sky gradient from `top` to `bottom` colour (0-255)."""
     t = np.linspace(0, 1, h)[:, None]
     rgb = (np.array(top) * (1 - t) + np.array(bottom) * t) / 255.0
     rgb = np.repeat(rgb[:, None, :], 4, axis=1)
@@ -1004,6 +1050,8 @@ def bg_layer(seed, w=1024, h=256, kind="far"):
     """White silhouettes (tinted at runtime) for the parallax background."""
     rng = np.random.default_rng(seed)
     x = np.arange(w) / w
+    # prof = height of the skyline (0..1 of the image) at each column:
+    # "far" = rolling hills, "mid" = peaky rocks, "near" = low bumpy ridge
     prof = np.zeros(w)
     if kind == "far":
         for k in (2, 3, 5, 7, 11):
@@ -1043,6 +1091,7 @@ def bg_layer(seed, w=1024, h=256, kind="far"):
 
 
 def _rgba_image(rgb, a):
+    """float RGB (0..1) and alpha (0..1) arrays -> PIL RGBA image."""
     rgb8 = (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
     a8 = (np.clip(a, 0, 1) * 255).astype(np.uint8)
     return Image.fromarray(np.dstack([rgb8, a8]), "RGBA")
@@ -1052,10 +1101,11 @@ def _rgba_image(rgb, a):
 # Floor decorations (non-colliding scenery)
 # ---------------------------------------------------------------------------
 
-DECOR_OUT = 256
+DECOR_OUT = 256               # saved size of scenery sprites (pixels)
 
 
 def weed_tuft(seed=0, palette=((40, 140, 50), (70, 170, 60), (30, 110, 60)), blades=9, width=26):
+    """A clump of tapering, curving seaweed blades."""
     img, d = _canvas()
     rng = np.random.default_rng(seed)
     for _ in range(blades):
@@ -1077,15 +1127,19 @@ def weed_tuft(seed=0, palette=((40, 140, 50), (70, 170, 60), (30, 110, 60)), bla
 
 
 def sea_grass(seed=0, palette=((90, 170, 70), (60, 140, 60), (120, 180, 80))):
+    """Many thin blades: a weed_tuft drawn as grass."""
     return weed_tuft(seed, palette, blades=26, width=9)
 
 
 def coral_tuft(seed=0, color=(240, 110, 120), depth=4, spread=0.45):
+    """Branching coral: each branch splits in two, `depth` times."""
     img, d = _canvas()
     rng = np.random.default_rng(seed)
     tip = _shade(color, 1.25)
 
     def branch(x, y, ang, length, width, depth):
+        # draws one branch, then calls itself for two shorter, thinner ones
+        # from its tip ("recursion"), until depth runs out
         x2 = x + math.cos(ang) * length
         y2 = y - math.sin(ang) * length
         d.line([(x, y), (x2, y2)], fill=OL, width=int(width + 8))
@@ -1127,6 +1181,7 @@ def sea_fan(seed=0, color=(200, 70, 150)):
 
 
 def brain_coral(seed=0, color=(200, 180, 110)):
+    """A dome of brain coral with wavy grooves."""
     img, d = _canvas()
     bbox = (40, 250, 472, 520 + 250)
     layer = radial_layer((S, S), bbox, _shade(color, 1.3), _shade(color, 0.6), hl=(-0.2, -0.6))
@@ -1151,6 +1206,7 @@ def brain_coral(seed=0, color=(200, 180, 110)):
 
 
 def tube_sponge(seed=0, color=(230, 120, 60)):
+    """A cluster of upright tube sponges."""
     img, d = _canvas()
     rng = np.random.default_rng(seed)
     tubes = sorted([(rng.uniform(120, 390), rng.uniform(200, 440), rng.uniform(34, 52)) for _ in range(5)],
@@ -1165,6 +1221,7 @@ def tube_sponge(seed=0, color=(230, 120, 60)):
 
 
 def anemone(seed=0, color=(255, 130, 170), stem=(200, 90, 60)):
+    """A sea anemone: a stubby stem with a crown of wavy tentacles."""
     img, d = _canvas()
     rng = np.random.default_rng(seed)
     cx = 256
@@ -1205,8 +1262,12 @@ def kelp_tall(seed=0, color=(150, 120, 40)):
 
 
 def rock_small(seed=0):
+    """A small rock (a boulder drawing) for floor scenery."""
     return ground(boulder(seed)).resize((DECOR_OUT, DECOR_OUT), Image.LANCZOS)
 
+
+# Asset name -> drawing function.  The names are what themes.py lists in
+# `decor`, `obstacles`, etc. and become the file names in assets/.
 
 DECOR_DRAW = {
     "weed0": lambda: weed_tuft(1),
@@ -1239,6 +1300,8 @@ DECOR_DRAW = {
 }
 
 
+# obstacles return a list of animation frames (one frame if not animated);
+# ground() moves floor objects down so they stand on the bottom edge
 OBSTACLE_DRAW = {
     "chest": lambda: [ground(chest())],
     "boulder": lambda: [ground(boulder())],
@@ -1258,10 +1321,11 @@ REWARD_DRAW = {"pearl": pearl, "shell": shell, "starfish": starfish, "gem": gem}
 
 BOAT_DRAW = {"sailboat": sailboat, "warship": warship, "trawler": trawler}
 
-PLAYER_FRAMES = 8
+PLAYER_FRAMES = 8             # frames in the player's swimming animation
 
 
 def player_frames(name):
+    """All animation frames for player sprite `name` (see Theme.player)."""
     if name == "sub":
         return [sub_frame(i / PLAYER_FRAMES) for i in range(PLAYER_FRAMES)]
     if name == "mermaid":

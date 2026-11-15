@@ -13,8 +13,8 @@ from panda3d.core import (Geom, GeomNode, GeomTriangles, GeomVertexData, GeomVer
 
 from .. import config
 
-PERIOD = 32.0
-K = 2 * math.pi / PERIOD
+PERIOD = 32.0                 # the floor/cliff relief repeats every this many units in y
+K = 2 * math.pi / PERIOD      # so sin(n * K * y) repeats exactly every PERIOD for whole n
 W = config.HALF_W
 
 
@@ -24,9 +24,13 @@ def floor_height(x, y):
     Gentle dunes and ripples between 0 and ~0.27, rising into sand banks
     beyond the swimmable area where the floor meets the cliffs.
     """
+    # three sine waves at different scales and angles make the dunes; the
+    # y frequencies are whole multiples of K so the pattern tiles every PERIOD
     h = (0.12 + 0.07 * np.sin(3 * K * y + 0.35 * x)
          + 0.05 * np.sin(2 * K * y - 0.22 * x + 1.3)
          + 0.025 * np.sin(11 * K * y + 0.9 * x))
+    # sand banks: from 1 unit inside the corridor edge, rising smoothly by
+    # 1.3 units over the next 5 units
     t = np.clip((np.abs(x) - (W - 1.0)) / 5.0, 0.0, 1.0)
     h = h + 1.3 * t * t * (3 - 2 * t)
     return np.maximum(h, 0.0)
@@ -45,8 +49,14 @@ def grid_mesh(name, P, facing):
 
     facing is a vector the normals should point towards (e.g. up for the
     floor), used to orient the triangles and normals consistently.
+
+    Each grid cell becomes two triangles.  The work is done with numpy on
+    whole arrays and copied straight into Panda3D's buffers, which is far
+    faster than adding thousands of vertices one by one in Python.
     """
     rows, cols, _ = P.shape
+    # Normals (the direction each point of the surface faces, used for
+    # lighting): the cross product of the two directions along the surface.
     du = np.gradient(P, axis=1)
     dv = np.gradient(P, axis=0)
     N = np.cross(du, dv)
@@ -54,12 +64,15 @@ def grid_mesh(name, P, facing):
     flip = np.sum(N * np.asarray(facing, dtype=np.float64), axis=2).mean() < 0
     if flip:
         N = -N
+    # one row per vertex: x, y, z, nx, ny, nz (format "V3N3")
     verts = np.concatenate([P, N], axis=2).reshape(-1, 6).astype(np.float32)
 
     vdata = GeomVertexData(name, GeomVertexFormat.getV3n3(), Geom.UH_static)
     vdata.uncleanSetNumRows(len(verts))
     memoryview(vdata.modifyArray(0)).cast("B")[:] = verts.tobytes()
 
+    # vertex numbers of each cell's corners: i0 top-left, i1 to its right,
+    # i2 below it, i3 diagonally opposite
     r, c = np.mgrid[0:rows - 1, 0:cols - 1]
     i0 = (r * cols + c).ravel()
     i1, i2, i3 = i0 + 1, i0 + cols, i0 + cols + 1
@@ -82,6 +95,8 @@ def grid_mesh(name, P, facing):
 
 
 def floor_mesh(y0, y1, step=0.6):
+    """Sea floor from y0 to y1 (a little wider than the corridor), with a
+    vertex every `step` units."""
     xs = np.arange(-W - 6, W + 6 + step / 2, step)
     ys = np.arange(y0, y1 + step / 2, step)
     X, Y = np.meshgrid(xs, ys)

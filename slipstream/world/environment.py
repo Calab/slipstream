@@ -12,9 +12,9 @@ from .common import card
 from .terrain import PERIOD, cliff_mesh, floor_height, floor_mesh
 from .trench import STRAIGHT
 
-FLOOR_LEN = 215.0
-FLOOR_BACK = 30.0
-DECOR_COUNT = 190
+FLOOR_LEN = 215.0     # floor/cliff meshes reach this far ahead of the player...
+FLOOR_BACK = 30.0     # ...and this far behind
+DECOR_COUNT = 190     # number of scenery plants kept in the scene at once
 
 # decor name prefix -> (min, max) height in world units
 DECOR_SIZE = {
@@ -24,6 +24,9 @@ DECOR_SIZE = {
 
 
 def _world_texgen(np_, stage, mat):
+    """Texture `np_` by world position instead of the mesh's own texture
+    coordinates.  The floor and cliff meshes move along with the player, but
+    with this their textures stay fixed in the world (no sliding)."""
     np_.setTexGen(stage, TexGenAttrib.M_world_position)
     np_.setTexTransform(stage, TransformState.makeMat(mat))
 
@@ -38,6 +41,8 @@ def _uv_mat(u_axis, v_axis, su, sv, ou=0.0, ov=0.0):
 
 
 class Environment:
+    """The scenery: everything that is just there to look at."""
+
     def __init__(self, base, res, theme):
         self.base = base
         self.theme = theme
@@ -67,7 +72,10 @@ class Environment:
         self.follow = self.root.attachNewNode("follow")
         self.floor = self.follow.attachNewNode(floor_mesh(-FLOOR_BACK, FLOOR_LEN))
         self.floor.setTexture(res.texture("textures", f"floor_{theme.floor}.png", wrap=True))
+        # sand texture repeats every 9 units
         _world_texgen(self.floor, TextureStage.getDefault(), _uv_mat(0, 1, 1 / 9.0, 1 / 9.0))
+        # a second texture layer: rippling light patterns ("caustics"), added
+        # on top of the sand and slowly scrolled in update()
         self.caustic_stage = TextureStage("caustics")
         self.caustic_stage.setMode(TextureStage.M_add)
         self.floor.setTexture(self.caustic_stage, res.texture("fx", "caustics.png", wrap=True))
@@ -94,6 +102,7 @@ class Environment:
         # Three layers far ahead; nearer layers shift more with the camera.
         self.bg_root = self.root.attachNewNode("bg")
         self.layers = []
+        # (layer, parallax factor, distance ahead, height, draw order)
         specs = [("far", 0.08, 275, 84, 0), ("mid", 0.2, 258, 50, 1), ("near", 0.38, 240, 31, 2)]
         for i, (name, parallax, dist, height, order) in enumerate(specs):
             tex = res.texture("bg", f"{name}.png", wrap=True)
@@ -121,6 +130,7 @@ class Environment:
                                               ColorBlendAttrib.O_one))
             r.setColor(*theme.surface, 0.18)
             r.setBillboardAxis()
+            # [node, x, y, phase]
             self.rays.append([r, random.uniform(-W, W), random.uniform(0, 205), random.uniform(0, 6)])
 
         # --- floor decorations (scenery only, recycled ahead of the player) ---
@@ -135,11 +145,12 @@ class Environment:
             np_ = card(self.root, None, 1, 1, anchor="bottom")
             np_.setBillboardAxis()
             np_.setDepthWrite(False)
-            item = [np_, 0.0, 0.0]
+            item = [np_, 0.0, 0.0]          # [node, x, y]
             self._place_decor(item, random.uniform(-10, 200))
             self.decor.append(item)
 
     def _place_decor(self, item, y):
+        """Give a scenery item a random plant picture, size and x at distance y."""
         np_ = item[0]
         i = random.randrange(len(self.decor_tex))
         name = self.decor_names[i]
@@ -159,9 +170,15 @@ class Environment:
         item[1], item[2] = x, y
 
     def update(self, cam_x, cam_y, follow_y, t):
+        """Per-frame scenery update.  cam_x/cam_y: camera position;
+        follow_y: the player's distance (the floor/cliffs follow it)."""
+        # plants that drop behind the camera are recycled ~210 units ahead
         for item in self.decor:
             if item[2] < cam_y - 3:
                 self._place_decor(item, item[2] + 210 + random.uniform(0, 10))
+        # The floor and cliffs move forward in whole PERIODs (the relief repeats
+        # every PERIOD, so the jump is invisible).  The cliff meshes are rebuilt
+        # at each jump because the trench's drift does not repeat.
         snap = math.floor(follow_y / PERIOD) * PERIOD
         if snap != self.snap_y:
             self.snap_y = snap
@@ -192,11 +209,13 @@ class Environment:
             self._place_decor(item, item[2])
 
     def _build_cliffs(self):
+        """Replace both cliff meshes with new ones for the current snap_y."""
         for holder in self.cliffs:
             holder.getChildren().detach()
             side = holder.getPythonTag("side")
             holder.attachNewNode(cliff_mesh(side, -FLOOR_BACK, FLOOR_LEN, self.trench, self.snap_y))
 
     def destroy(self):
+        """Remove all scenery and the fog."""
         self.base.render.clearFog()
         self.root.removeNode()

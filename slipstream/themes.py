@@ -14,9 +14,11 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class Theme:
-    key: str
-    name: str
-    blurb: str
+    """One playable world.  Colours are (r, g, b) from 0 to 1, except
+    sky_top/sky_bottom/wave_colors which are 0 to 255."""
+    key: str                         # short id used in file names and the save file
+    name: str                        # shown on the title screen
+    blurb: str                       # one-line description under the name
     player: str                      # sprite family name ("fish_clown", "sub", ...)
     boat: str                        # boat sprite name
     floor: str                       # floor material
@@ -26,11 +28,15 @@ class Theme:
     rewards: tuple = ("pearl", "shell", "starfish", "gem")
     water: tuple = (0.10, 0.35, 0.50)        # fog / background colour
     surface: tuple = (0.55, 0.85, 0.95)      # underside of the waves
+    # tints of the far / mid / near background hills
     bg_tints: tuple = ((0.2, 0.45, 0.58), (0.14, 0.34, 0.45), (0.09, 0.24, 0.33))
-    sky_top: tuple = (70, 140, 220)
+    sky_top: tuple = (70, 140, 220)          # sky gradient in the band at the top
     sky_bottom: tuple = (190, 225, 245)
-    wave_colors: tuple = ((40, 110, 170), (30, 95, 150), (20, 80, 130))
-    decor: tuple = ("weed0", "coral0")
+    wave_colors: tuple = ((40, 110, 170), (30, 95, 150), (20, 80, 130))  # back/mid/front waves
+    decor: tuple = ("weed0", "coral0")      # scenery plants (names in sprites.DECOR_DRAW)
+    # music: root = MIDI note of the key (60 = middle C), scale, bpm = tempo,
+    # seed = which random tune, lead = melody instrument, progression = chord
+    # per bar as scale steps (0 = home chord); see assetgen/audio.py
     music: dict = field(default_factory=dict)
 
 
@@ -100,7 +106,7 @@ THEMES = [
     ),
 ]
 
-THEME_BY_KEY = {t.key: t for t in THEMES}
+THEME_BY_KEY = {t.key: t for t in THEMES}     # e.g. THEME_BY_KEY["reef"]
 
 # Reward kind -> (health restored, sprite size)
 REWARD_INFO = {
@@ -110,7 +116,12 @@ REWARD_INFO = {
     "gem": (30, 1.6),
 }
 
-# Obstacle kind -> dict(size, floating, moves, frames)
+# Obstacle kind -> settings:
+#   size      sprite size in world units
+#   floating  hovers mid-water (False = sits on the floor)
+#   moves     wanders around (otherwise stays put)
+#   tether    a chain runs down to the floor
+#   move      optional custom movement ranges (see Obstacle.__init__)
 OBSTACLE_INFO = {
     "chest":     dict(size=4.3, floating=False, moves=False),
     "boulder":   dict(size=4.8, floating=False, moves=False),

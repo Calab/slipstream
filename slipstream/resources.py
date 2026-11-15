@@ -12,7 +12,7 @@ from panda3d.core import Filename, SamplerState, Texture
 
 from .assetgen import AssetBuilder
 
-CUSTOM_DIR = Path(__file__).resolve().parents[1] / "custom"
+CUSTOM_DIR = Path(__file__).resolve().parents[1] / "custom"     # <project>/custom
 
 
 def custom_dirs():
@@ -27,16 +27,22 @@ def custom_dirs():
         dirs.append(Path(sys.executable).resolve().parent / "custom")
     dirs.append(CUSTOM_DIR)
     return dirs
+
+
+# a custom file may use any of these formats, whatever the generated file uses
 IMAGE_EXTS = (".png", ".jpg", ".jpeg")
 SOUND_EXTS = (".wav", ".ogg", ".mp3", ".flac")
 
 
 class Resources:
+    """Finds and loads assets.  Asset names are given as path parts, e.g.
+    texture("fx", "bubble.png") -> custom/fx/bubble.png or assets/fx/bubble.png."""
+
     def __init__(self, base, builder: AssetBuilder, custom_dir=None):
         self.base = base
         self.builder = builder
         self.custom = [Path(custom_dir)] if custom_dir else custom_dirs()
-        self._tex = {}
+        self._tex = {}          # cache: each texture is loaded only once
         self._sfx = {}
 
     def custom_path(self, *parts):
@@ -44,6 +50,7 @@ class Resources:
         for folder in self.custom:
             p = folder.joinpath(*parts)
             exts = IMAGE_EXTS if p.suffix.lower() in IMAGE_EXTS else SOUND_EXTS
+            # try the requested extension first, then the other formats
             for ext in (p.suffix,) + tuple(e for e in exts if e != p.suffix):
                 q = p.with_suffix(ext)
                 if q.is_file():
@@ -55,6 +62,12 @@ class Resources:
         return self.custom_path(*parts) or self.builder.path(*parts)
 
     def texture(self, *parts, wrap=False, mipmap=True):
+        """Load (once) and return a texture.
+
+        wrap=True makes it repeat when tiled (floors, cliffs, waves); otherwise
+        its edge pixels are stretched.  mipmap=True keeps it smooth when seen
+        small or far away.
+        """
         key = parts + (wrap, mipmap)
         if key not in self._tex:
             path = self.path(*parts)
@@ -79,9 +92,11 @@ class Resources:
         return [self.texture(folder, f"{name}_{i}.png") for i in range(n)]
 
     def sfx_path(self, name):
+        """Path of sound effect `name` (e.g. "splat"), in Panda3D's format."""
         return Filename.fromOsSpecific(str(self.path("sfx", f"{name}.wav")))
 
     def music_path(self, theme_key, stage):
+        """Path of a theme's music for one stage (e.g. reef_3.wav)."""
         return Filename.fromOsSpecific(str(self.path("music", f"{theme_key}_{stage}.wav")))
 
     @staticmethod
@@ -90,6 +105,7 @@ class Resources:
         h, w = rgba.shape[:2]
         tex = Texture(name)
         tex.setup2dTexture(w, h, Texture.T_unsigned_byte, Texture.F_rgba8)
+        # Panda3D textures start at the bottom row, so flip the rows
         tex.setRamImageAs(rgba[::-1].tobytes(), "RGBA")
         tex.setWrapU(SamplerState.WM_clamp)
         tex.setWrapV(SamplerState.WM_clamp)

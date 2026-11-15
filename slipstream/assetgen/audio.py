@@ -1,14 +1,31 @@
-"""Procedural sound effects and music (numpy synthesis -> 16-bit WAV)."""
+"""Procedural sound effects and music (numpy synthesis -> 16-bit WAV).
+
+A sound here is just a numpy array of samples between -1 and +1, SR of
+them per second.  Tones are made by adding sine waves: sin(2*pi*f*t) is a
+pure tone of frequency f; adding multiples of f ("harmonics") changes its
+character (a whistle has few, a fiddle many).  Multiplying by an
+*envelope* shapes its volume over time, e.g. exp(-t * 9) dies away quickly.
+Noise filtered to a band of frequencies gives swishes, shakers and splashes.
+
+A pitch that changes over time (a falling "thump") is made with
+sin(2*pi * cumsum(f) / SR): the running sum of the frequency is the phase.
+
+Notes are numbered the MIDI way: 60 = middle C, +1 = one semitone up, +12 =
+one octave up.  midi_hz() converts a note number to a frequency.
+"""
 
 import wave
 
 import numpy as np
 
-SR = 22050
+SR = 22050          # sample rate: samples per second
 
 
 def write_wav(path, samples, sr=SR):
+    """Save samples (-1..1) as a mono 16-bit WAV file."""
     s = np.asarray(samples, dtype=np.float32)
+    # if anything would go past full volume, turn the whole sound down so it
+    # doesn't distort
     peak = np.max(np.abs(s)) if s.size else 0
     if peak > 0.98:
         s = s * (0.98 / peak)
@@ -21,14 +38,17 @@ def write_wav(path, samples, sr=SR):
 
 
 def _t(dur):
+    """Time in seconds of each sample of a sound `dur` seconds long."""
     return np.arange(int(dur * SR)) / SR
 
 
 def _noise(n, seed=0):
+    """n samples of white noise (hiss)."""
     return np.random.default_rng(seed).uniform(-1, 1, n)
 
 
 def _bandpass(x, lo, hi):
+    """Keep only the frequencies between lo and hi Hz (via FFT)."""
     spec = np.fft.rfft(x)
     f = np.fft.rfftfreq(len(x), 1 / SR)
     gain = ((f >= lo) & (f <= hi)).astype(float)
@@ -38,10 +58,13 @@ def _bandpass(x, lo, hi):
 
 
 def _lowpass(x, cutoff):
+    """Keep only frequencies below `cutoff` Hz (muffles a sound)."""
     return _bandpass(x, 0, cutoff)
 
 
 def midi_hz(m):
+    """Frequency of MIDI note m (69 = the A above middle C = 440 Hz; each
+    semitone multiplies the frequency by 2^(1/12))."""
     return 440.0 * 2 ** ((m - 69) / 12)
 
 
@@ -50,6 +73,7 @@ def midi_hz(m):
 # ---------------------------------------------------------------------------
 
 def sfx_swish(variant=0):
+    """Swimming whoosh: a burst of band-passed noise that swells and fades."""
     dur = 0.38
     t = _t(dur)
     n = _noise(len(t), 10 + variant)
@@ -62,9 +86,11 @@ def sfx_swish(variant=0):
 
 
 def sfx_splat():
+    """Crashing into something: a falling-pitch thump, a muffled splash and
+    a sprinkle of short watery blips."""
     dur = 0.6
     t = _t(dur)
-    f = 140 * np.exp(-t * 9) + 40
+    f = 140 * np.exp(-t * 9) + 40            # pitch drops from 180 Hz towards 40 Hz
     thump = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * 9)
     n = _lowpass(_noise(len(t), 3), 1800) * np.exp(-t * 14)
     wet = np.zeros_like(t)
@@ -78,6 +104,8 @@ def sfx_splat():
 
 
 def _bell(freq, dur, decay=4.0):
+    """A bell-like note: the base tone plus fast-fading overtones, a sharp
+    start (the min(1, t*400) ramp, 2.5 ms) and an exponential fade."""
     t = _t(dur)
     s = (np.sin(2 * np.pi * freq * t) + 0.45 * np.sin(2 * np.pi * freq * 2.0 * t) * np.exp(-t * 3)
          + 0.25 * np.sin(2 * np.pi * freq * 3.01 * t) * np.exp(-t * 6))
@@ -87,7 +115,7 @@ def _bell(freq, dur, decay=4.0):
 def sfx_chime(level):
     """Reward jingle; bigger rewards play longer arpeggios."""
     notes = {0: [79, 84], 1: [76, 79, 84], 2: [72, 76, 79, 84], 3: [72, 76, 79, 84, 88, 91]}[level]
-    step = 0.075
+    step = 0.075                       # seconds between notes
     dur = step * len(notes) + 0.6
     out = np.zeros(int(dur * SR) + SR)
     for i, m in enumerate(notes):
@@ -98,6 +126,7 @@ def sfx_chime(level):
 
 
 def sfx_bounce():
+    """Bumping the floor or a cliff: a quick rising "boing" plus bubbles."""
     t = _t(0.28)
     f = 180 + 420 * (t / 0.28)
     s = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t * 14)
@@ -105,6 +134,7 @@ def sfx_bounce():
 
 
 def sfx_bubbles(dur=0.5, seed=1):
+    """Random little "bloop"s: each a short sine whose pitch rises quickly."""
     out = np.zeros(int(dur * SR))
     rng = np.random.default_rng(seed)
     for _ in range(int(dur * 14)):
@@ -119,6 +149,7 @@ def sfx_bubbles(dur=0.5, seed=1):
 
 
 def sfx_fanfare():
+    """New best time: a rising major arpeggio of bells.  (note, start time)."""
     notes = [(72, 0.0), (76, 0.12), (79, 0.24), (84, 0.36), (79, 0.52), (84, 0.62)]
     out = np.zeros(int(1.5 * SR))
     for m, st in notes:
@@ -129,6 +160,7 @@ def sfx_fanfare():
 
 
 def sfx_gameover():
+    """Four falling notes."""
     out = np.zeros(int(1.9 * SR))
     for i, m in enumerate([67, 63, 60, 55]):
         t = _t(0.6)
@@ -139,10 +171,12 @@ def sfx_gameover():
 
 
 def sfx_click():
+    """Menu click: a very short, fast-fading 900 Hz beep."""
     t = _t(0.06)
     return np.sin(2 * np.pi * 900 * t) * np.exp(-t * 80) * 0.5
 
 
+# sound effect name (sfx/<name>.wav, what SoundManager.play() takes) -> generator
 SFX = {
     "swish0": lambda: sfx_swish(0),
     "swish1": lambda: sfx_swish(1),
@@ -163,6 +197,7 @@ SFX = {
 # Music
 # ---------------------------------------------------------------------------
 
+# the notes of each scale, in semitones above the key's root note
 SCALES = {
     "major": [0, 2, 4, 5, 7, 9, 11],
     "minor": [0, 2, 3, 5, 7, 8, 10],
@@ -171,6 +206,9 @@ SCALES = {
 
 
 def _adsr(n, a=0.01, d=0.08, s=0.7, r=0.1):
+    """Classic synthesizer volume envelope, n samples long:
+    Attack (rise to full in a seconds), Decay (fall to level s over d seconds),
+    Sustain (hold at s), Release (fade to 0 over the final r seconds)."""
     t = np.arange(n) / SR
     dur = n / SR
     env = np.where(t < a, t / max(a, 1e-4),
@@ -179,7 +217,11 @@ def _adsr(n, a=0.01, d=0.08, s=0.7, r=0.1):
     return env * rel
 
 
+# --- instruments: each returns one note of the given frequency and length ---
+
 def inst_whistle(freq, dur):
+    """Tin whistle: nearly pure tone with vibrato (a slight wobble in pitch)
+    and a little breath noise."""
     t = _t(dur)
     vib = 1 + 0.006 * np.sin(2 * np.pi * 5.5 * t) * np.minimum(1, t * 3)
     ph = 2 * np.pi * freq * np.cumsum(vib) / SR
@@ -189,6 +231,8 @@ def inst_whistle(freq, dur):
 
 
 def inst_accordion(freq, dur):
+    """Accordion: two slightly out-of-tune reeds (det = detune), each rich in
+    harmonics; the detuning gives the typical shimmering beat."""
     t = _t(dur)
     out = np.zeros_like(t)
     for det in (0.997, 1.003):
@@ -199,18 +243,21 @@ def inst_accordion(freq, dur):
 
 
 def inst_marimba(freq, dur):
+    """Marimba: a struck tone that rings on and fades (always at least 0.5 s)."""
     t = _t(max(dur, 0.5))
     s = np.sin(2 * np.pi * freq * t) + 0.3 * np.sin(2 * np.pi * freq * 4 * t) * np.exp(-t * 18)
     return s * np.exp(-t * 6) * np.minimum(1, t * 600)
 
 
 def inst_bass(freq, dur):
+    """Plucked bass note."""
     t = _t(dur)
     s = np.sin(2 * np.pi * freq * t) + 0.35 * np.sin(4 * np.pi * freq * t) + 0.1 * np.sin(6 * np.pi * freq * t)
     return s * np.exp(-t * 3.0) * _adsr(len(t), 0.005, 0.05, 1.0, 0.05)
 
 
 def inst_pad(freq, dur):
+    """Soft sustained background chord tone (three slightly detuned sines)."""
     t = _t(dur)
     s = np.zeros_like(t)
     for det in (0.995, 1.0, 1.005):
@@ -219,6 +266,8 @@ def inst_pad(freq, dur):
 
 
 def drum(kind, seed=0):
+    """Percussion hit: "low" (bass drum), "tap" (wood block) or anything else
+    (shaker)."""
     if kind == "low":
         t = _t(0.35)
         f = 110 * np.exp(-t * 8) + 55
@@ -231,6 +280,7 @@ def drum(kind, seed=0):
 
 
 def ocean_bed(dur, seed=0):
+    """Background sea rumble: muffled noise that swells like waves."""
     n = _lowpass(_noise(int(dur * SR), seed), 500)
     t = _t(dur)
     # waves: slow swells whose period divides the loop so it stays seamless
@@ -251,6 +301,7 @@ def inst_fiddle(freq, dur):
     return (out * 0.35 + scratch) * _adsr(len(t), 0.02, 0.08, 0.8, 0.05)
 
 
+# lead instrument name (as used in themes.py) -> function
 INSTRUMENTS = {"whistle": inst_whistle, "accordion": inst_accordion, "marimba": inst_marimba,
                "fiddle": inst_fiddle}
 
@@ -263,6 +314,7 @@ STAGE_SPEED = [1.15, 1.18, 1.21, 1.24, 1.27, 1.30, 1.33, 1.36]
 STAGE_KEY = [0, 5, -3, 2, 0, 5, -3, 2]
 
 # chord progressions (scale degrees, one per bar) for the contrasting B section
+# (0 = the home chord, 3 = the fourth chord of the scale, 4 = the fifth, ...)
 B_PROGRESSIONS = [
     (3, 3, 0, 0, 4, 4, 0, 0),
     (5, 3, 0, 4, 5, 3, 4, 4),
@@ -270,7 +322,8 @@ B_PROGRESSIONS = [
     (3, 4, 0, 5, 3, 4, 4, 0),
 ]
 
-# rhythm cells (in eighth notes) for 6/8 jigs and 4/4 hornpipes
+# rhythm cells (in eighth notes) for 6/8 jigs and 4/4 hornpipes.  Each list
+# is one bar: [3, 3] = two long notes, [2, 1, 2, 1] = long-short-long-short...
 PATTERNS = {
     6: [[3, 3], [2, 1, 2, 1], [3, 2, 1], [1, 1, 1, 3], [2, 1, 3], [1, 1, 1, 2, 1], [6]],
     8: [[2, 2, 2, 2], [1, 1, 2, 2, 2], [3, 1, 2, 2], [2, 1, 1, 2, 2], [1, 1, 1, 1, 2, 2],
@@ -303,6 +356,8 @@ def _melody(rng, scale, root, chord_roots, beats_per_bar, octave_span=9, bar_off
     """
     notes = []
     patterns = PATTERNS[beats_per_bar]
+    # deg is the current note as a scale step (0 = root, 7 = root an octave
+    # up); the melody moves mostly by small steps from note to note
     deg = 4
     motif_a = [patterns[rng.integers(len(patterns))] for _ in range(2)]
     for bar, croot in enumerate(chord_roots):
@@ -321,7 +376,7 @@ def _melody(rng, scale, root, chord_roots, beats_per_bar, octave_span=9, bar_off
             deg = int(np.clip(deg, 0, octave_span + 2))
             if bar == len(chord_roots) - 1 and beat + L >= beats_per_bar:
                 deg = 7 if deg > 3 else 0  # resolve to the tonic
-            o, s = divmod(deg, 7)
+            o, s = divmod(deg, 7)        # octave and position within the scale
             notes.append(((bar + bar_offset) * beats_per_bar + beat, L, root + 12 * o + scale[s]))
             beat += L
     return notes
@@ -336,6 +391,7 @@ def render_music(params, stage):
     busier and faster as the stages go up.
     """
     stage = min(stage, MUSIC_STAGES - 1)
+    # seeded per theme and stage: the same tune comes out every time
     rng = np.random.default_rng(params["seed"] * 100 + stage)
     scale = SCALES[params["scale"]]
     root = params["root"] + STAGE_KEY[stage]
@@ -345,7 +401,7 @@ def render_music(params, stage):
     leads = [params["lead"], "fiddle", "accordion", params["lead"], "whistle", "fiddle",
              params["lead"], "fiddle"]
     lead = INSTRUMENTS[leads[stage]]
-    eighth = 60.0 / bpm / 2
+    eighth = 60.0 / bpm / 2                         # length of one eighth note (s)
     bar_len = eighth * beats_per_bar
     prog_a = list(params["progression"])[:8]
     prog_b = list(B_PROGRESSIONS[(params["seed"] + stage) % len(B_PROGRESSIONS)])
@@ -353,13 +409,16 @@ def render_music(params, stage):
     bars = len(prog)
     dur = bar_len * bars
     n = int(dur * SR)
-    buf = np.zeros(n)
-    strong = (0, 3) if beats_per_bar == 6 else (0, 4)
+    buf = np.zeros(n)                                # the whole tune is mixed into this
+    strong = (0, 3) if beats_per_bar == 6 else (0, 4)   # accented eighths in each bar
 
     def chord(degree):
+        """The three notes (1st, 3rd, 5th) of the chord on scale step `degree`,
+        an octave below the root."""
         return [root - 12 + 12 * ((degree + k) // 7) + scale[(degree + k) % 7] for k in (0, 2, 4)]
 
     def at(bar, beat):
+        """Sample position of eighth-note `beat` in bar `bar`."""
         return int((bar * beats_per_bar + beat) * eighth * SR)
 
     # pad chords and ocean ambience (always)
@@ -378,6 +437,7 @@ def render_music(params, stage):
             _add(buf, inst_marimba(midi_hz(m + 12), L * eighth), s, 0.07)
         if intensity >= 4:  # harmony a third below in the B section
             if st >= 8 * beats_per_bar:
+                # find which scale step the melody note is, then go two steps down
                 deg_idx = min(range(7), key=lambda i: abs((root + 12 + scale[i]) % 12 - m % 12))
                 h = m - (scale[deg_idx] - scale[(deg_idx - 2) % 7]) % 12
                 _add(buf, inst_accordion(midi_hz(h), L * eighth * 0.9), s, 0.09)
@@ -414,4 +474,4 @@ def render_music(params, stage):
                 for m in chord(deg):
                     _add(buf, inst_accordion(midi_hz(m + 12), eighth * 0.5), at(b, beat), 0.045)
 
-    return buf * 0.8
+    return buf * 0.8           # leave some headroom

@@ -1,4 +1,15 @@
-"""Persistent settings and per-theme records (JSON in the user data dir)."""
+"""Persistent settings and per-theme records (JSON in the user data dir).
+
+save.json looks like:
+
+    {"theme": "reef", "sound": true, "touch": null, "aim": true,
+     "window": {"size": [1280, 720], "origin": [100, 80]},
+     "records": {"reef": {"best_time": 61.2, "best_distance": 830.5,
+                          "last_time": 40.0, "last_distance": 510.0}, ...}}
+
+Times are in seconds and distances in world units.  Delete the file (or run
+with --reset-save, which clears only the records) to start fresh.
+"""
 
 import json
 import os
@@ -7,6 +18,8 @@ from pathlib import Path
 
 
 def user_data_dir():
+    """The folder for the save file (created if missing), following each
+    system's convention."""
     if sys.platform.startswith("win"):
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
         p = base / "Slipstream"
@@ -58,20 +71,27 @@ def _migrate_old_save(new_dir):
         pass
 
 
+# settings used when the save file is missing or doesn't mention them
 DEFAULTS = {"theme": "reef", "sound": True, "touch": None, "aim": True, "window": None, "records": {}}
 
 
 class SaveData:
+    """The save file.  Use it like a dict: save["sound"] reads a setting, and
+    save["sound"] = False changes it and writes the file immediately."""
+
     def __init__(self, path=None):
         self.path = Path(path) if path else user_data_dir() / "save.json"
-        self.data = json.loads(json.dumps(DEFAULTS))
+        self.data = json.loads(json.dumps(DEFAULTS))     # a deep copy of DEFAULTS
         try:
             self.data.update(json.loads(self.path.read_text()))
         except (OSError, ValueError):
-            pass
+            pass            # no save yet, or it is unreadable: start with the defaults
 
     def save(self):
+        """Write the file.  Errors are ignored: losing a save must never crash the game."""
         try:
+            # write to a temporary file, then swap it in, so a crash halfway
+            # through writing can't leave a half-written save behind
             tmp = self.path.with_suffix(".tmp")
             tmp.write_text(json.dumps(self.data, indent=2))
             tmp.replace(self.path)
@@ -92,6 +112,7 @@ class SaveData:
                                            "last_time": 0.0, "last_distance": 0.0})
 
     def finish_run(self, theme_key, time_s, distance):
+        """Record a finished run; returns True if it beat the best time."""
         r = self.record(theme_key)
         new_best = time_s > r["best_time"]
         if new_best:
@@ -101,6 +122,7 @@ class SaveData:
         return new_best
 
     def reset_best(self, theme_key):
+        """Forget the best time for one theme (the last run is kept)."""
         r = self.record(theme_key)
         r["best_time"] = r["best_distance"] = 0.0
         self.save()

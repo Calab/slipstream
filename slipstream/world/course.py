@@ -1,6 +1,18 @@
 """Course generation: spawns walls, obstacles and rewards ahead of the player
 and removes them once they are far behind.  Also holds the distance markers
-for 'last run' and 'best time'."""
+for 'last run' and 'best time'.
+
+The course is endless and random, but generated in order from one seed:
+it is built one *segment* at a time, each segment being a wall followed by
+rows of obstacles (or the odd reward) up to where the next wall goes.  New
+segments are added whenever the next wall position comes within
+SPAWN_AHEAD of the player, so there is always about that much course ahead.
+
+Every object in Course.objects has the same small interface used by
+World.update: ``kind`` ("wall" / "obstacle" / "reward"), ``y``,
+``collides(x, y, z, r)``, ``update(dt, t, player_y)``, ``remove()`` and the
+flags ``hit`` / ``passed``.
+"""
 
 import random
 
@@ -12,14 +24,20 @@ from .obstacles import Obstacle, Reward, obstacle_height
 from .trench import STRAIGHT
 from .walls import WallFactory
 
+# how often each reward appears (relative chances): small ones are common,
+# the big health gem is rare
 REWARD_WEIGHTS = {"pearl": 0.45, "shell": 0.3, "starfish": 0.18, "gem": 0.07}
 
 
 def lerp(a, b, t):
+    """Blend from a (t=0) to b (t=1).  Used with t = difficulty below, e.g.
+    lerp(46, 30, d) is 46 at the start and 30 at full difficulty."""
     return a + (b - a) * t
 
 
 class Course:
+    """The walls, obstacles and rewards of one run."""
+
     def __init__(self, parent, res, theme, seed=None, trench=None):
         self.parent = parent.attachNewNode("course")
         self.trench = trench or STRAIGHT
@@ -28,7 +46,7 @@ class Course:
         self.rng = random.Random(seed)
         self.factory = WallFactory(res, theme, seed)
         self.objects = []
-        self.next_wall_y = 55.0
+        self.next_wall_y = 55.0         # where the first wall goes (a calm start)
         # where the player can be coming from: the start spot, then the
         # previous wall's openings (used to keep every wall reachable)
         self.prev_y = 0.0
@@ -36,18 +54,23 @@ class Course:
         self.enabled = True
 
     def fill(self, player_y, difficulty):
+        """Generate segments until the course reaches SPAWN_AHEAD past the player."""
         if not self.enabled:
             return
         while self.next_wall_y < player_y + config.SPAWN_AHEAD:
             self._segment(difficulty)
 
     def _segment(self, d):
+        """Add one wall plus whatever comes between it and the next wall.
+        d is the difficulty, 0 (start) .. 1 (hardest)."""
         rng = self.rng
         wall = self.factory.create(self.parent, self.next_wall_y, d, self.anchors, self.prev_y,
                                    x_range=self.trench.bounds(self.next_wall_y, 3.0))
+        # the next wall must be reachable from one of this wall's openings
         self.prev_y = wall.back
         self.anchors = [(o[0], o[1]) for o in wall.openings]
         self.objects.append(wall)
+        # distance to the next wall: shorter as difficulty rises
         gap = rng.uniform(lerp(46, 30, d), lerp(78, 52, d))
         next_y = self.next_wall_y + gap
 
@@ -79,6 +102,9 @@ class Course:
         self.next_wall_y = next_y
 
     def _obstacle_x(self, wall, y):
+        """Pick an x for an obstacle at distance y: anywhere half the time,
+        otherwise in line with one of the wall's openings (where the fish is
+        probably heading)."""
         rng = self.rng
         lo, hi = self.trench.bounds(y, 2.5)
         if rng.random() < 0.5:
@@ -88,27 +114,31 @@ class Course:
         return max(lo, min(hi, ox))
 
     def _reward(self, x, y, z):
+        """Add a random reward (chosen by REWARD_WEIGHTS) at (x, y, z)."""
         names = list(REWARD_WEIGHTS)
         name = self.rng.choices(names, weights=[REWARD_WEIGHTS[n] for n in names])[0]
         self.objects.append(Reward(self.parent, self.res, name, x, y, z, self.rng))
 
     def update(self, dt, t, player_y):
+        """Animate the objects and delete those left far behind the player."""
         keep = []
         for o in self.objects:
             if o.y < player_y - config.DESPAWN_BEHIND:
                 o.remove()
                 continue
-            if o.y < player_y + config.SPAWN_AHEAD + 10:
+            if o.y < player_y + config.SPAWN_AHEAD + 10:     # objects far ahead can wait
                 o.update(dt, t, player_y)
             keep.append(o)
         self.objects = keep
 
     def clear(self):
+        """Remove every object."""
         for o in self.objects:
             o.remove()
         self.objects = []
 
     def destroy(self):
+        """Remove every object and the course's scene node."""
         self.clear()
         self.parent.removeNode()
 
@@ -121,8 +151,11 @@ class DistanceMarker:
         self.root = parent.attachNewNode("marker")
         self.root.setPos(0, y, 0)
         tex = res.texture("fx", tex_name)
+        # "additive" blending: the card's colour is added to what's behind it,
+        # so it glows (brightens) rather than covering things up
         add = ColorBlendAttrib.make(ColorBlendAttrib.M_add, ColorBlendAttrib.O_incoming_alpha,
                                     ColorBlendAttrib.O_one)
+        # a row of 17 glowing posts across the corridor, plus a stripe on the floor
         for i in range(17):
             x = -config.HALF_W + 1 + i * (2 * config.HALF_W - 2) / 16
             c = card(self.root, tex, 0.8, config.WORLD_H, anchor="bottom")
@@ -151,9 +184,12 @@ class DistanceMarker:
         self.label_x = 0.0
 
     def update(self, player_x, player_y, t):
+        """Keep the label in front of the fish (hopping up and down once a
+        second) and fade the gate out once the fish has gone through it."""
         self.text.setPos(player_x, 0, config.WORLD_H * 0.62 + 0.2 * (t % 1.0 < 0.5))
         if player_y > self.y:
             self.root.setAlphaScale(max(0.0, 1 - (player_y - self.y) / 6))
 
     def remove(self):
+        """Remove the gate from the scene."""
         self.root.removeNode()

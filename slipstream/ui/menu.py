@@ -1,4 +1,10 @@
-"""Start screen, About page, pause overlay and game-over panel."""
+"""Start screen, About page, pause overlay and game-over panel.
+
+Each panel is a DirectFrame (a rectangle in 2D screen space) holding text
+and buttons.  The panels are built once at start-up and then just shown or
+hidden by the app as the game state changes.  Buttons call methods on the
+app (the same ones the keyboard shortcuts use).
+"""
 
 from direct.gui.DirectGui import DirectFrame, OnscreenImage
 from direct.gui.OnscreenText import OnscreenText
@@ -9,6 +15,8 @@ from .common import button, fmt_time, PANEL, ACCENT, TEXT, MUTED
 
 
 class StartMenu:
+    """The title screen."""
+
     def __init__(self, base, app):
         self.app = app
         # more see-through than the other panels so the scene shows behind it
@@ -49,6 +57,8 @@ class StartMenu:
         self.frames = []
 
     def refresh(self, theme, record, sound_on, touch_on, aim_on, frames):
+        """Update the text and button labels (after a setting or the theme changes).
+        `frames` are the theme's player animation frames for the preview."""
         self.frames = frames
         for img in self.previews:
             img.setImage(frames[0])
@@ -65,6 +75,7 @@ class StartMenu:
         self.b_aim["text"] = f"Aim Helper: {'On' if aim_on else 'Off'}  [A]"
 
     def update(self, dt):
+        """Animate the player previews on either side of the theme name."""
         if self.frames and not self.frame.isHidden():
             self.anim += dt * 8
             for img in self.previews:
@@ -107,6 +118,7 @@ class AboutPanel:
                          align=TextNode.ALeft)
             t = OnscreenText(parent=self.frame, text=text, pos=(-0.42, z), scale=0.042, fg=TEXT,
                              align=TextNode.ALeft, wordwrap=29)
+            # move down by however many lines the text wrapped onto
             lines = max(1, t.textNode.getNumRows())
             z -= 0.06 + 0.052 * lines
         button(self.frame, "Close  [? / Esc]", app.toggle_about, (0, 0, -0.76), width=0.8)
@@ -123,6 +135,8 @@ class AboutPanel:
 
 
 class GameOverPanel:
+    """Shown when health runs out: the run's time and walls, and the best time."""
+
     def __init__(self, base, app):
         self.frame = DirectFrame(parent=base.aspect2d, frameColor=PANEL,
                                  frameSize=(-0.7, 0.7, -0.5, 0.45), pos=(0, 0, -0.08))
@@ -137,6 +151,7 @@ class GameOverPanel:
         self.hide()
 
     def show(self, run_time, walls, best_time, new_best):
+        """Fill in this run's results and show the panel."""
         self.stats.setText(f"Time {fmt_time(run_time)}     Walls {walls}")
         self.best.setText("NEW BEST TIME!" if new_best else f"Best {fmt_time(best_time)}")
         self.frame.show()
@@ -146,6 +161,8 @@ class GameOverPanel:
 
 
 class PausePanel:
+    """The PAUSED overlay with Resume and Menu buttons."""
+
     def __init__(self, base, app):
         self.frame = DirectFrame(parent=base.aspect2d, frameColor=PANEL,
                                  frameSize=(-0.55, 0.55, -0.32, 0.3))

@@ -11,8 +11,10 @@ class TouchControls:
         self.keys = keys
         self.arrow = res.texture("fx", "arrow.png")
         self.buttons = []
+        # anchor nodes that stick to the screen corners whatever the window shape
         bl, br, tr = base.a2dBottomLeft, base.a2dBottomRight, base.a2dTopRight
         s = 0.11
+        # (key it presses, arrow rotation in degrees, position) for the D-pad
         pad = [("arrow_up", 0, (0.33, 0, 0.5)), ("arrow_down", 180, (0.33, 0, 0.16)),
                ("arrow_left", -90, (0.16, 0, 0.33)), ("arrow_right", 90, (0.50, 0, 0.33))]
         for key, roll, pos in pad:
@@ -29,6 +31,7 @@ class TouchControls:
         self.hide()
 
     def _hold(self, parent, key, label, pos, size):
+        """A button that holds `key` down for as long as it is pressed."""
         b = DirectButton(parent=parent, text=label, pos=pos, scale=size * 0.42, text_scale=1.6,
                          text_fg=(1, 1, 1, 0.95), text_align=TextNode.ACenter,
                          frameColor=(0.1, 0.35, 0.5, 0.55), relief=DGG.FLAT,

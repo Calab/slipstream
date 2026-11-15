@@ -3,6 +3,22 @@
 A wall is a stack of alpha-textured slices (giving it thickness).  The same
 boolean mask that cuts the holes in the texture is used for collision, so
 what you see is exactly what you can swim through.
+
+Making a wall, step by step (WallFactory.create):
+
+1. Decide how many openings (1-3) and work out how far the fish can move
+   sideways/vertically before reaching this wall (pace.reach).
+2. make_openings() places lumpy round holes so that every opening of the
+   *previous* wall has at least one hole here within reach - so the course
+   can never become impossible.
+3. opening_mask() turns the holes into a pixel grid: True = solid wall.
+4. compose_texture() paints the material image with that mask as its
+   transparency, plus shading around the holes.
+5. Wall() stacks several copies of the texture to give the wall depth, and
+   adds the glow that shines through the holes.
+
+Wall pixel coordinates: column 0 is the left edge of the wall (x = -WALL_W/2),
+row 0 is the *top* (the surface, z = WALL_H); PPU pixels per world unit.
 """
 
 import math
@@ -46,6 +62,12 @@ CZ_MAX = WALL_H - config.FISH_RADIUS - 0.75
 
 
 def _shape(difficulty, rng):
+    """Random outline for one opening: (base radius, harmonics, stretch).
+
+    The edge is a circle of radius base_r with a few sine "harmonics" added
+    around it - k bumps per lap, amplitude a (fraction of base_r), phase ph -
+    which makes it lumpy.  Holes shrink as difficulty rises.
+    """
     base_r = (2.9 - 1.35 * difficulty) * rng.uniform(0.85, 1.2)
     # harmonics make the outline lumpy; total amplitude kept <= 0.3 so
     # the narrowest part still fits the fish comfortably
@@ -70,6 +92,9 @@ def _covers(anchor, opening, reach_x, reach_z):
 
 def make_openings(n, difficulty, rng, anchors=None, reach_x=1e9, reach_z=1e9, x_range=None):
     """Like _try_openings, retried until every approach is covered.
+
+    Up to 30 attempts; if none covers every approach, the attempt that left
+    the fewest uncovered is used.
 
     x_range is the (min, max) x for opening centres: the open part of the
     trench at this wall, which narrows when the side cliffs drift inwards.
@@ -109,6 +134,7 @@ def _try_openings(n, difficulty, rng, anchors, reach_x, reach_z, lo, hi):
         else:
             cx = rng.uniform(lo, hi)
             cz = rng.uniform(CZ_MIN, CZ_MAX)
+        # keep holes well apart sideways, so they don't merge into one
         if any(abs(cx - o[0]) < (base_r + o[2]) * 1.5 + 2.5 for o in openings):
             continue
         op = (cx, cz, base_r, harm, stretch)
@@ -122,16 +148,22 @@ def opening_mask(openings, w=WALL_PX_W, h=WALL_PX_H):
     solid = np.ones((h, w), dtype=bool)
     ppu = config.PPU
     for cx, cz, base_r, harm, stretch in openings:
+        # the opening's centre in pixels
         px = (cx + WALL_W / 2) * ppu
         pz = (WALL_H - cz) * ppu
+        # only look at a square around the hole big enough to hold it (faster)
         R = base_r * 1.45 * max(stretch, 1 / stretch) * ppu
         x0, x1 = int(max(px - R, 0)), int(min(px + R + 1, w))
         y0, y1 = int(max(pz - R, 0)), int(min(pz + R + 1, h))
         yy, xx = np.mgrid[y0:y1, x0:x1].astype(np.float32)
+        # each pixel's offset from the centre in world units, squashed by
+        # `stretch` so the hole comes out wider (stretch > 1) or taller (< 1)
         dx = (xx - px) / (ppu * stretch)
         dz = (yy - pz) / (ppu / stretch)
+        # polar coordinates: angle around the centre and distance from it
         theta = np.arctan2(dz, dx)
         r = np.hypot(dx, dz)
+        # the lumpy edge radius at each angle; pixels inside it are open water
         edge = np.full_like(theta, base_r)
         for k, a, ph in harm:
             edge += base_r * a * np.sin(k * theta + ph)
@@ -142,10 +174,14 @@ def opening_mask(openings, w=WALL_PX_W, h=WALL_PX_H):
 def compose_texture(material, solid, rng):
     """Combine a base material with the hole mask: shading + rim + alpha."""
     h, w = solid.shape
+    # every wall uses one of only a few material images, so shift it sideways
+    # by a random amount and maybe mirror it, so neighbouring walls differ
     mat = np.roll(material, rng.integers(0, w), axis=1)
     if rng.random() < 0.5:
         mat = mat[:, ::-1]
     s = solid.astype(np.float32)
+    # blurring the 0/1 mask gives values between 0 and 1 near hole edges;
+    # that's used to shade the edges (blur) and find a thin rim (lip)
     blur = box_blur(s, 7)
     # darken towards the holes (gives a sense of depth), brighten the very lip
     shade = 0.45 + 0.55 * np.clip((blur - 0.5) * 2.0, 0, 1)
@@ -155,12 +191,15 @@ def compose_texture(material, solid, rng):
     vert = np.linspace(1.08, 0.62, h)[:, None]
     rgb = mat * (shade * vert)[..., None]
     rgb[rim] = np.minimum(rgb[rim] * 1.6 + 0.08, 1.0)
+    # transparency: opaque where solid, with a soft 1-2 pixel edge (anti-aliasing)
     alpha = np.clip((lip - 0.3) * 2.5, 0, 1)
     rgba = np.dstack([np.clip(rgb, 0, 1), alpha])
     return (rgba * 255).astype(np.uint8)
 
 
 class Wall:
+    """One wall across the whole trench.  Its ends are hidden inside the
+    side cliffs.  Costs WALL_DAMAGE health if the fish hits a solid part."""
     kind = "wall"
 
     def __init__(self, parent, bank, material, y, thickness, openings, rng, light=None):
@@ -174,6 +213,8 @@ class Wall:
         self.tex = Resources.texture_from_array(rgba, "wall")
         self.root = parent.attachNewNode("wall")
         self.root.setPos(0, y, 0)
+        # one slice every ~0.3 units through the thickness (at least 3); seen at
+        # an angle, the stack of slices looks like a solid slab with deep holes
         n = max(3, int(thickness / 0.3))
         for i in range(n):
             t = i / (n - 1)
@@ -183,6 +224,7 @@ class Wall:
             k = 1.0 - 0.45 * math.sin(math.pi * t) - 0.15 * t   # inner slices darker
             c.setColorScale(k, k, k, 1)
         self.rim = self.rim_tex = None
+        # light = (soft glow texture, theme's surface colour)
         if light is not None:
             self._add_hole_lights(*light)
             self._add_rim_glow(light[1])
@@ -201,6 +243,7 @@ class Wall:
         rgba[..., 1] = int(255 * min(1.0, 0.55 + 0.45 * color[1]))
         rgba[..., 2] = int(255 * min(1.0, 0.55 + 0.45 * color[2]))
         rgba[..., 3] = (a * 255).astype(np.uint8)
+        # textures made at runtime from numpy arrays (not files)
         self.rim_tex = Resources.texture_from_array(rgba, "rim")
         self.rim = card(self.root, self.rim_tex, WALL_W, WALL_H, anchor="bottom")
         self.rim.setY(-self.thickness / 2 - 0.03)
@@ -237,13 +280,17 @@ class Wall:
     # -- geometry ------------------------------------------------------------
     @property
     def front(self):
+        """y of the face the fish approaches."""
         return self.y - self.thickness / 2
 
     @property
     def back(self):
+        """y of the far face."""
         return self.y + self.thickness / 2
 
     def solid_at(self, x, z):
+        """Is the wall solid at world position (x, z)?  Outside the mask counts
+        as solid."""
         col = int((x + WALL_W / 2) * config.PPU)
         row = int((WALL_H - z) * config.PPU)
         h, w = self.solid.shape
@@ -252,7 +299,12 @@ class Wall:
         return bool(self.solid[row, col])
 
     def collides(self, x, y, z, r):
-        if y + r * 0.5 < self.front or y - r * 0.5 > self.back:
+        """Does a fish of radius r at (x, y, z) touch solid wall?
+
+        Checks the centre point and 8 points around the edge of the fish's
+        circle against the hole mask.
+        """
+        if y + r * 0.5 < self.front or y - r * 0.5 > self.back:   # not inside the wall's thickness
             return False
         if self.solid_at(x, z):
             return True
@@ -263,33 +315,40 @@ class Wall:
         return False
 
     def update(self, dt, t, player_y):
+        """Pulse the rim glow; fade the wall out as the fish goes through."""
         if self.rim is not None:
             self.rim.setAlphaScale(0.3 + 0.1 * math.sin(t * 3.0 + self.y * 0.1))
         # fade out as the player passes through so the next obstacles show
         a = (self.back + 0.5 - player_y) / (self.thickness + 2.5)
         a = max(0.0, min(1.0, a))
-        if abs(a - self.alpha) > 0.01:
+        if abs(a - self.alpha) > 0.01:          # skip tiny changes (saves work)
             self.alpha = a
             self.root.setAlphaScale(a)
             if a <= 0.0:
                 self.root.hide()
 
     def remove(self):
+        """Remove the wall and let go of its textures (frees their memory)."""
         self.root.removeNode()
         self.tex = self.rim_tex = None
 
 
 class WallFactory:
+    """Makes the walls for one run: random but repeatable from the seed."""
+
     def __init__(self, res, theme, seed=None):
         self.theme = theme
         self.bank = MaterialBank(res, theme.wall_materials)
         self.light = (res.texture("fx", "soft.png"), theme.surface)
+        # two random generators from the same seed: numpy's for the texture
+        # work, Python's for the layout choices
         self.rng = np.random.default_rng(seed)
         self.pyrng = random.Random(seed)
 
     def create(self, parent, y, difficulty, anchors=None, prev_y=0.0, x_range=None):
         """anchors: (x, z) openings of the previous wall (or the start spot);
         x_range: where opening centres may go (the open trench at this wall)."""
+        # how many openings: usually 1 or 2; fewer 3s later in the run
         n = self.pyrng.choices([1, 2, 3], weights=[0.35, 0.4, 0.25])[0]
         if difficulty > 0.6 and n == 3 and self.pyrng.random() < 0.5:
             n = 2

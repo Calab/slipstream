@@ -1,4 +1,33 @@
-"""Main application: window setup, input, game states and scoring."""
+"""Main application: window setup, input, game states and scoring.
+
+How the game fits together
+--------------------------
+``main.py`` creates one :class:`SlipstreamApp`, which owns everything:
+
+* ``self.base``  - Panda3D's ShowBase (the window, scene graph, task loop).
+* ``self.res``   - :class:`~slipstream.resources.Resources`, the loader for
+  every image and sound (generated ones, or your own from ``custom/``).
+* ``self.world`` - :class:`~slipstream.world.World`, the 3D scene: fish,
+  course of walls/obstacles, sea floor, camera.  Rebuilt when the theme changes.
+* ``self.hud``, ``self.menu``, ... - the 2D overlays in ``slipstream/ui``.
+* ``self.sound`` - effects and the cross-fading music.
+* ``self.save``  - settings and best times, stored as JSON.
+
+The game is a small *state machine*; ``self.state`` is one of:
+
+    "menu"     title screen (the fish swims by itself in the background)
+    "about"    the About page, opened from the title screen with "?"
+    "play"     a run is in progress
+    "paused"   a run is frozen with the pause panel showing
+    "gameover" health reached zero; the game-over panel is showing
+
+Key presses arrive as Panda3D *events* and call the ``on_*`` methods below,
+which decide what the key means in the current state.  Once per frame
+Panda3D calls :meth:`SlipstreamApp._task`, which advances whichever state is
+active.  During play, :meth:`_update_play` asks the world to move everything,
+then turns what happened (hits, rewards, walls passed) into health changes,
+sounds and HUD updates.
+"""
 
 import os
 import random
@@ -13,7 +42,7 @@ from .themes import THEMES, THEME_BY_KEY
 FONT_PATH = Path(__file__).resolve().parent / "fonts" / "SomeTimeLater.otf"
 
 
-DEFAULT_WIN = (1280, 720)
+DEFAULT_WIN = (1280, 720)      # window size on the very first launch (pixels)
 
 
 def position_is_meaningful():
@@ -43,6 +72,12 @@ def configure_panda(args, saved_window=None):
     origin = usable_origin(saved.get("origin"))
     if origin and not (args.width or args.height):
         loadPrcFileData("", f"win-origin {origin[0]} {origin[1]}")
+    # Panda3D reads its settings from "PRC" text like this; it must be loaded
+    # before ShowBase opens the window.  Notable lines:
+    #   sync-video            - wait for the monitor refresh (no tearing, no
+    #                           wasted frames beyond the screen's rate)
+    #   framebuffer-multisample / multisamples - 4x anti-aliasing of edges
+    #   textures-power-2 none - allow textures of any size (not just 256, 512...)
     loadPrcFileData("", f"""
         window-title {config.TITLE}
         win-size {w} {h}
@@ -56,6 +91,8 @@ def configure_panda(args, saved_window=None):
         notify-level-audio error
     """)
     if args.offscreen:
+        # hidden --offscreen flag: render without a visible window or audio
+        # (handy for automated testing / screenshots)
         loadPrcFileData("", "window-type offscreen\naudio-library-name null")
 
 
@@ -63,6 +100,9 @@ class SlipstreamApp:
     """Owns the ShowBase instance and the game state machine."""
 
     def __init__(self, args):
+        # The save file is read first because it holds the last window size,
+        # which has to be configured before Panda3D is imported and the
+        # window opens.  That's why most imports here are inside the method.
         from .save import SaveData
         self.save = SaveData()
         configure_panda(args, self.save["window"])
@@ -75,9 +115,9 @@ class SlipstreamApp:
 
         self.args = args
         self.base = base = ShowBase()
-        base.disableMouse()
-        base.camLens.setFov(72)
-        base.camLens.setNearFar(0.2, 450)
+        base.disableMouse()                 # turn off Panda3D's built-in mouse camera control
+        base.camLens.setFov(72)             # replaced every frame by World._place_camera
+        base.camLens.setNearFar(0.2, 450)   # nothing nearer/further than this is drawn
         self._load_font()
         # remember the window size/position whenever it changes
         self.window_events = DirectObject()
@@ -104,18 +144,23 @@ class SlipstreamApp:
         self.sound = SoundManager(base, self.res, bool(self.save["sound"]))
 
         # --- input state -----------------------------------------------------
+        # Keys that are *held* (swimming, zoom) are tracked in self.keys:
+        # Panda3D sends an event "<key>" on press and "<key>-up" on release,
+        # and each frame _input() reads which ones are currently down.  The
+        # on-screen touch buttons write into this same dict.
         self.keys = {k: False for k in ("arrow_left", "arrow_right", "arrow_up", "arrow_down", "a", "z")}
         for k in self.keys:
             if k != "a":
                 base.accept(k, self.keys.__setitem__, [k, True])
             base.accept(k + "-up", self.keys.__setitem__, [k, False])
-        base.accept("a", self.on_a)
+        base.accept("a", self.on_a)          # "A" also toggles the aim helper on the menu
         # "?" is typed differently on different keyboards, so watch the typed
         # character rather than a particular key.  Panda3D only sends these
         # "keystroke" events when they are switched on for the keyboard.
         for bt in getattr(base, "buttonThrowers", None) or []:
             bt.node().setKeystrokeEvent("keystroke")
         base.accept("keystroke", self.on_keystroke)
+        # keys that are simply *pressed* (menu actions) call a method directly
         for key, fn in (("t", self.on_t), ("s", self.on_s), ("r", self.on_r), ("q", self.on_q),
                         ("escape", self.on_escape), ("space", self.on_space),
                         ("p", self.toggle_pause), ("b", self.toggle_touch)):
@@ -134,6 +179,7 @@ class SlipstreamApp:
         self.about = AboutPanel(base, self)
         self.touch = TouchControls(base, self.res, self.keys, self.toggle_pause)
         touch = self.save["touch"]
+        # None means "never chosen": default to off on desktop
         self.touch_on = bool(touch) if touch is not None else sys.platform == "android"
 
         self.aim_on = bool(self.save["aim"])
@@ -141,13 +187,16 @@ class SlipstreamApp:
         self.theme = None
         self.state = "menu"
         self.run_time = 0.0
+        # start with the theme used last time (falling back to the first one)
         key = self.save["theme"] if self.save["theme"] in THEME_BY_KEY else THEMES[0].key
         self.load_theme(THEME_BY_KEY[key])
         self.to_menu()
+        # ask Panda3D to call self._task once every frame from now on
         base.taskMgr.add(self._task, "slipstream-update")
 
     # ------------------------------------------------------------------ themes
     def load_theme(self, theme):
+        """Throw away the current 3D world and build a fresh one in `theme`."""
         from .world import World
         if self.world:
             self.world.destroy()
@@ -158,6 +207,7 @@ class SlipstreamApp:
         self.sound.set_theme(theme.key)
 
     def next_theme(self):
+        """T key / Theme button: switch to the next theme (title screen only)."""
         if self.state != "menu":
             return
         i = (THEMES.index(self.theme) + 1) % len(THEMES)
@@ -168,6 +218,7 @@ class SlipstreamApp:
         self.refresh_menu()
 
     def refresh_menu(self):
+        """Redraw the title screen's text and button labels from current settings."""
         rec = self.save.record(self.theme.key)
         if self.state == "menu":
             self.hud.set_values(0.0, 0, config.HEALTH_MAX, rec["best_time"], rec["last_time"])
@@ -176,6 +227,8 @@ class SlipstreamApp:
 
     # ------------------------------------------------------------------ states
     def to_menu(self):
+        """Go to the title screen (from anywhere).  Leaving a run early still
+        records its time."""
         if self.state in ("play", "paused"):
             self._finish_run(show_panel=False)
         self.state = "menu"
@@ -191,6 +244,7 @@ class SlipstreamApp:
         self.sound.play_stage(0)
 
     def start_run(self):
+        """Begin a new run: fresh random course, full health, counters at zero."""
         if self.state not in ("menu", "gameover"):
             return
         self.sound.play("click")
@@ -200,22 +254,26 @@ class SlipstreamApp:
         if self.touch_on:
             self.touch.show()
         rec = self.save.record(self.theme.key)
-        self.record = dict(rec)
+        self.record = dict(rec)      # a copy: the saved record changes when this run ends
+        # the seed decides the whole course (walls, obstacles, cliff drift)
         self.world.start_run(rec, seed=random.randrange(1 << 30))
         self.state = "play"
-        self.run_time = 0.0
+        self.run_time = 0.0          # seconds survived - this is the score
         self.health = config.HEALTH_MAX
         self.walls_passed = 0
-        self.progress = 0
-        self.invuln = 0.0
-        self.swish_t = 0.0
-        self.swish_n = 0
-        self.cliff_cd = 0.0
+        self.progress = 0            # walls + obstacles passed (drives the music stage)
+        self.invuln = 0.0            # seconds left during which hits do no damage
+        self.swish_t = 0.0           # countdown to the next swimming "swish" sound
+        self.swish_n = 0             # alternates between the two swish sounds
+        self.cliff_cd = 0.0          # countdown before a cliff scrape can hurt again
+        # banners for beating the last run / best time; skip them if there is
+        # nothing (meaningful) to beat yet
         self.passed_last = rec["last_distance"] <= 20
         self.passed_best = rec["best_time"] <= 0
         self.sound.play_stage(0, fade=1.0)
 
     def toggle_pause(self):
+        """P key / pause button.  While paused, _task simply skips the world update."""
         if self.state == "play":
             self.state = "paused"
             self.pause_panel.show()
@@ -224,6 +282,7 @@ class SlipstreamApp:
             self.pause_panel.hide()
 
     def _finish_run(self, show_panel=True):
+        """Save this run's time and distance; returns True if it was a new best."""
         new_best = self.save.finish_run(self.theme.key, self.run_time, self.world.player.y)
         if show_panel:
             rec = self.save.record(self.theme.key)
@@ -231,6 +290,7 @@ class SlipstreamApp:
         return new_best
 
     def game_over(self):
+        """Health ran out: stop the run, save it and show the game-over panel."""
         self.state = "gameover"
         self.hud.banner.setText("")
         self.sound.play("gameover")
@@ -274,7 +334,9 @@ class SlipstreamApp:
         self.base.win.requestProperties(wp)
 
     def _on_window_event(self, win):
-        # compare with == : Panda3D may hand back a different Python object for
+        """Called by Panda3D whenever the window opens, moves, resizes, etc.
+        Saves the new size (and position, where meaningful) for next launch."""
+        # compare with ==: Panda3D may hand back a different Python object for
         # the same window, so an identity check ("is") would never match
         if win != self.base.win or self.args.offscreen:
             return
@@ -302,12 +364,15 @@ class SlipstreamApp:
         font = self.base.loader.loadFont(Filename.fromOsSpecific(str(FONT_PATH)).getFullpath())
         if not font.isValid():
             return
-        font.setPixelsPerUnit(96)
+        font.setPixelsPerUnit(96)          # rasterise glyphs large so text stays crisp
         TextNode.setDefaultFont(font)
         DGG.setDefaultFont(font)
         self.font = font
 
     # ------------------------------------------------------------------ menu keys
+    # Each on_<key> method is called when that key is pressed.  Most keys only
+    # do something on the title screen; the matching toggle_* / reset_* methods
+    # are also what the menu buttons call.
     def on_a(self):
         """A: toggle the aim helper on the start screen; zoom in while playing."""
         self.keys["a"] = True
@@ -379,6 +444,8 @@ class SlipstreamApp:
             self.sound.play("click")
 
     def on_escape(self):
+        """Esc backs out one level: About -> menu, play/pause/game over -> menu,
+        menu -> quit."""
         if self.state == "about":
             self.toggle_about()
         elif self.state == "menu":
@@ -401,6 +468,12 @@ class SlipstreamApp:
 
     # ------------------------------------------------------------------ frame
     def _task(self, task):
+        """Runs once per frame (registered in __init__).
+
+        dt is the time since the last frame, in seconds.  It is capped at 1/20 s
+        so a stall (e.g. dragging the window) can't make the fish jump through a
+        wall in one giant step.
+        """
         dt = min(self.base.clock.getDt(), 1 / 20)
         self.sound.update(dt)
         self.hud.update(dt)
@@ -412,10 +485,14 @@ class SlipstreamApp:
         elif self.state in ("menu", "about"):
             self._update_attract(dt)
         elif self.state == "gameover":
+            # the fish keeps drifting slowly forward behind the game-over panel
             self.world.update(dt, 0, 0, 2.0, 0.0, active=False)
-        return task.cont
+        # (while "paused" nothing in the world is updated, so it stays frozen)
+        return task.cont            # "call me again next frame"
 
     def _input(self):
+        """Turn the held keys into directions, each -1, 0 or +1:
+        ix = left/right, iz = down/up, zoom = camera closer (-1) / further (+1)."""
         k = self.keys
         ix = (1 if k["arrow_right"] else 0) - (1 if k["arrow_left"] else 0)
         iz = (1 if k["arrow_up"] else 0) - (1 if k["arrow_down"] else 0)
@@ -427,20 +504,27 @@ class SlipstreamApp:
         import math
         p = self.world.player
         t = self.world.time
+        # fake "key presses" from slow sine waves: swim up now and then when
+        # low, and weave gently from side to side
         iz = 1 if p.z < config.WORLD_H * 0.35 and math.sin(t * 0.7) > 0 else 0
         ix = 1 if math.sin(t * 0.37) > 0.8 else -1 if math.sin(t * 0.37) < -0.8 else 0
         self.world.update(dt, ix, iz, 5.0, 0.0, active=False)
 
     def _update_play(self, dt):
+        """One frame of a run: move the world, then apply the game rules
+        (damage, rewards, music changes, banners, game over)."""
         from .world.pace import forward_speed
         ix, iz, zoom = self._input()
         w = self.world
         p = w.player
         was_moving = p.moving
         self.run_time += dt
+        # events: things the fish bumped ("floor", "side")
+        # hits:   (kind, object) pairs - "hit" an obstacle/wall, "reward"
+        #         collected, or "passed" a wall/obstacle safely
         events, hits = w.update(dt, ix, iz, forward_speed(self.run_time), zoom)
 
-        # swimming swish
+        # swimming swish: on starting to move, then every half second while moving
         self.swish_t -= dt
         if p.moving and (not was_moving or self.swish_t <= 0):
             self.sound.play(f"swish{self.swish_n % 2}", 0.7, random.uniform(0.9, 1.1))
@@ -462,6 +546,8 @@ class SlipstreamApp:
         self.invuln = max(0.0, self.invuln - dt)
         for kind, obj in hits:
             if kind == "hit":
+                # Damage only if not still recovering from the last hit, so
+                # brushing along a wall over several frames costs one hit, not many.
                 if self.invuln <= 0:
                     dmg = config.WALL_DAMAGE if obj.kind == "wall" else config.OBSTACLE_DAMAGE
                     self.health -= dmg
@@ -480,11 +566,15 @@ class SlipstreamApp:
                 if obj.kind == "wall":
                     self.walls_passed += 1
                 self.progress += 1
+                # every MUSIC_STAGE_EVERY things passed, move on to the next
+                # (busier, faster) tune; play_stage ignores repeats of the same stage
                 stage = self.progress // config.MUSIC_STAGE_EVERY
                 self.sound.play_stage(stage)
 
+        # slow natural healing
         self.health = min(config.HEALTH_MAX, self.health + config.HEALTH_REGEN * dt)
 
+        # one-off banners when this run overtakes the previous run / the best time
         if not self.passed_last and p.y > self.record["last_distance"]:
             self.passed_last = True
             self.hud.show_banner("Passed your last run!", (1, 0.85, 0.3, 1))
@@ -494,6 +584,7 @@ class SlipstreamApp:
             self.hud.show_banner("NEW BEST TIME!", (0.45, 1, 0.55, 1), 3.5)
             self.sound.play("fanfare")
 
+        # the HUD's BEST shows this run's time once it is ahead of the record
         best = max(self.record["best_time"], self.run_time)
         self.hud.set_values(self.run_time, self.walls_passed, self.health, best, self.record["last_time"])
         if self.health <= 0:
@@ -502,4 +593,5 @@ class SlipstreamApp:
             self.game_over()
 
     def run(self):
+        """Hand control to Panda3D's main loop (returns when the game quits)."""
         self.base.run()

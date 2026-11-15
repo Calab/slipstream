@@ -1,4 +1,14 @@
-"""Procedural material textures: sea floor, cliffs, water surface and walls."""
+"""Procedural material textures: sea floor, cliffs, water surface and walls.
+
+The recipe is nearly always the same: make some smooth noise
+(periodic_noise), maybe add patterns built from sine waves (ripples, strata,
+planks), colour it with colormap(), then mix in patches of a second colour
+where another noise is high (moss, algae, rust - using smoothstep as the
+mask).  Working on whole numpy arrays at once keeps it fast.
+
+Floor and cliff textures tile in both directions.  Wall materials tile
+horizontally only.
+"""
 
 import numpy as np
 
@@ -10,6 +20,7 @@ from .common import periodic_noise, colormap, box_blur, smoothstep, to_image
 # ---------------------------------------------------------------------------
 
 def floor_sand(size=512, seed=1):
+    """Pale sand with wind ripples and a scattering of pebbles."""
     n = periodic_noise(size, size, beta=2.4, seed=seed)
     fine = periodic_noise(size, size, beta=0.6, seed=seed + 1)
     yy, xx = np.mgrid[0:size, 0:size].astype(np.float32) / size
@@ -24,6 +35,7 @@ def floor_sand(size=512, seed=1):
 
 
 def floor_gravel(size=512, seed=2):
+    """Dark grey sea bed covered in pebbles (Shipwreck theme)."""
     n = periodic_noise(size, size, beta=2.0, seed=seed)
     rgb = colormap(n, [(0.0, (0.22, 0.22, 0.24)), (1.0, (0.42, 0.40, 0.38))])
     rgb = _scatter_pebbles(rgb, seed + 3, count=900, rmin=3, rmax=9,
@@ -33,6 +45,7 @@ def floor_gravel(size=512, seed=2):
 
 
 def floor_mud(size=512, seed=3):
+    """Brown mud with patches of green algae (Kelp theme)."""
     n = periodic_noise(size, size, beta=2.6, seed=seed)
     f = periodic_noise(size, size, beta=1.0, seed=seed + 1)
     v = 0.7 * n + 0.3 * f
@@ -48,6 +61,8 @@ def floor_mud(size=512, seed=3):
 
 
 def _scatter_pebbles(rgb, seed, count, rmin, rmax, palette):
+    """Paint `count` little shaded pebbles (radius rmin..rmax pixels, colours
+    from palette) onto an image, wrapping around its edges so it still tiles."""
     h, w, _ = rgb.shape
     rng = np.random.default_rng(seed)
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
@@ -77,6 +92,8 @@ def _scatter_pebbles(rgb, seed, count, rmin, rmax, palette):
 # ---------------------------------------------------------------------------
 
 def cliff_rock(kind, w=512, h=256, seed=10):
+    """Layered rock for the side cliffs, with dark cracks and patches of moss.
+    kind picks the colours: "reefrock", "kelprock" or "darkrock"."""
     n = periodic_noise(w, h, beta=2.2, seed=seed)
     f = periodic_noise(w, h, beta=1.0, seed=seed + 1)
     yy = np.mgrid[0:h, 0:w][0].astype(np.float32) / h
@@ -92,6 +109,8 @@ def cliff_rock(kind, w=512, h=256, seed=10):
         stops = [(0, (0.10, 0.11, 0.14)), (0.5, (0.24, 0.25, 0.29)), (1, (0.42, 0.42, 0.45))]
         moss = (0.25, 0.32, 0.25)
     rgb = colormap(v, stops)
+    # "ridge" trick: 1 - |2n - 1| is 1 along the lines where noise n passes
+    # 0.5, giving thin wandering lines - used here as cracks
     ridge = 1 - np.abs(periodic_noise(w, h, beta=1.8, seed=seed + 2) * 2 - 1)
     rgb *= (1 - 0.5 * smoothstep(0.93, 0.99, ridge))[..., None]
     m = smoothstep(0.6, 0.72, periodic_noise(w, h, beta=2.6, seed=seed + 3))[..., None]
@@ -100,6 +119,7 @@ def cliff_rock(kind, w=512, h=256, seed=10):
 
 
 def surface_caustics(size=256, seed=20):
+    """The underside of the water surface: light blue with bright ripple lines."""
     n = periodic_noise(size, size, beta=2.2, seed=seed)
     ridge = 1 - np.abs(n * 2 - 1)
     n2 = periodic_noise(size, size, beta=2.0, seed=seed + 1)
@@ -131,7 +151,11 @@ def light_ray(w=64, h=256):
 # Wall materials (tileable horizontally so they can be rolled for variety)
 # ---------------------------------------------------------------------------
 
+# Each wall material function returns a float RGB array (h, w, 3) in 0..1;
+# wall_material_image() adds relief shading and turns it into an image.
+
 def wall_coral(w, h, seed):
+    """Pink/orange coral with purple and yellow patches and dotted polyps."""
     n = periodic_noise(w, h, beta=2.3, seed=seed)
     f = periodic_noise(w, h, beta=1.0, seed=seed + 1)
     rgb = colormap(n, [(0.0, (0.45, 0.10, 0.30)), (0.35, (0.85, 0.30, 0.35)),
@@ -153,6 +177,7 @@ def wall_coral(w, h, seed):
 
 
 def wall_seaweed(w, h, seed):
+    """Three layers of wavy vertical kelp strands, with round air bladders."""
     rng = np.random.default_rng(seed)
     n = periodic_noise(w, h, beta=2.5, seed=seed)
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
@@ -181,6 +206,7 @@ def wall_seaweed(w, h, seed):
 
 
 def wall_ship(w, h, seed):
+    """Wooden hull planks with seams, ribs, nails, algae, rust and portholes."""
     rng = np.random.default_rng(seed)
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
     plank_h = 18
@@ -222,6 +248,7 @@ def wall_ship(w, h, seed):
 
 
 def wall_rock(w, h, seed):
+    """Grey rock with cracks, moss and colourful sponges."""
     n = periodic_noise(w, h, beta=2.3, seed=seed)
     f = periodic_noise(w, h, beta=1.0, seed=seed + 1)
     rgb = colormap(0.65 * n + 0.35 * f, [(0, (0.15, 0.15, 0.17)), (0.5, (0.36, 0.34, 0.33)),
@@ -244,6 +271,7 @@ def wall_rock(w, h, seed):
     return np.clip(rgb, 0, 1)
 
 
+# name used in themes.py -> generator
 WALL_MATERIALS = {
     "coral": wall_coral,
     "seaweed": wall_seaweed,
@@ -264,6 +292,7 @@ def emboss(rgb, strength=3.5, radius=2):
 
 
 def wall_material_image(name, w, h, seed=100):
+    """The finished wall material `name` as an image (relief shading added)."""
     rgb = WALL_MATERIALS[name](w, h, seed)
     rgb = emboss(rgb, strength={"ship": 2.0, "seaweed": 2.5}.get(name, 4.0))
     return to_image(rgb)

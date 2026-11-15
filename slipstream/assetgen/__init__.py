@@ -3,6 +3,15 @@
 All images, textures, sound effects and music are generated on first run
 (or by ``python tools/generate_assets.py``) and cached on disk.  Bump
 ``config.ASSET_VERSION`` to force regeneration after changing a generator.
+
+How it works: AssetBuilder lists every file the game needs together with
+the function that makes it (a "task").  build() runs the tasks whose file
+doesn't exist yet and saves the result - a PIL image as .png, or a numpy
+array of audio samples as .wav.  So deleting one file from assets/ and
+restarting regenerates just that file.
+
+Generators live in sprites.py (drawn pictures), textures.py (noise-based
+materials) and audio.py (sound effects and music).
 """
 
 import json
@@ -14,6 +23,7 @@ from .. import config
 from ..themes import THEMES, OBSTACLE_INFO, REWARD_INFO
 from . import sprites, textures, audio
 
+# size in pixels of a wall's texture (and its collision mask)
 WALL_PX_W = int(2 * (config.HALF_W + config.WALL_EXTRA) * config.PPU)
 WALL_PX_H = int(config.WORLD_H * config.PPU)
 
@@ -57,6 +67,8 @@ def default_asset_dir():
 
 
 class AssetBuilder:
+    """Knows where every generated asset goes and how to make it."""
+
     def __init__(self, root=None):
         self.root = Path(root) if root else default_asset_dir()
         stamp = self.root / "version.json"
@@ -66,6 +78,8 @@ class AssetBuilder:
                 version = json.loads(stamp.read_text()).get("version")
             except (OSError, ValueError):
                 version = None
+        # assets from an older version of the generators: delete them all
+        # so they are remade (custom/ is never touched)
         if version != config.ASSET_VERSION:
             for sub in ("player", "obstacles", "rewards", "boats", "fx", "textures", "band",
                         "bg", "sfx", "music", "decor"):
@@ -74,10 +88,17 @@ class AssetBuilder:
             stamp.write_text(json.dumps({"version": config.ASSET_VERSION}))
 
     def path(self, *parts):
+        """Where a generated asset lives, e.g. path("fx", "bubble.png")."""
         return self.root.joinpath(*parts)
 
     # -- tasks -----------------------------------------------------------
+    # A task is (file path, function).  The function returns what to save, or
+    # None if it saved the file(s) itself (animations save several frames).
+    # Functions are wrapped in lambdas so nothing is drawn until build() needs
+    # it; the "n=name" default arguments capture each loop value (a plain
+    # lambda would see only the loop's last value).
     def _tasks_common(self):
+        """Assets shared by every theme."""
         t = []
         P = self.path
         for name in ("fish_clown", "fish_tang", "sub", "mermaid"):
@@ -124,6 +145,7 @@ class AssetBuilder:
         return t
 
     def _tasks_theme(self, theme):
+        """Assets specific to one theme: sky, waves and music."""
         t = []
         P = self.path
         t.append((P("band", f"{theme.key}_sky.png"),
@@ -137,12 +159,14 @@ class AssetBuilder:
         return t
 
     def _save_frames(self, folder, name, frames):
+        """Save animation frames as name_0.png, name_1.png, ..."""
         self.path(folder).mkdir(parents=True, exist_ok=True)
         for i, im in enumerate(frames):
             im.save(self.path(folder, f"{name}_{i}.png"))
         return None
 
     def pending(self, themes=None):
+        """The tasks whose output file doesn't exist yet."""
         themes = THEMES if themes is None else themes
         tasks = self._tasks_common()
         for th in themes:
@@ -168,6 +192,7 @@ class AssetBuilder:
         return len(todo)
 
     def frame_count(self, folder, name):
+        """How many name_N.png animation frames exist."""
         n = 0
         while self.path(folder, f"{name}_{n}.png").exists():
             n += 1
@@ -175,5 +200,6 @@ class AssetBuilder:
 
 
 def build_all(root=None, progress=None):
+    """Generate every missing asset for every theme."""
     return AssetBuilder(root).build(THEMES, progress)
 

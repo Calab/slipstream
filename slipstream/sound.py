@@ -1,17 +1,24 @@
-"""Sound effects and cross-fading, stage-based background music."""
+"""Sound effects and cross-fading, stage-based background music.
+
+Each theme has several music "stages" (see assetgen/audio.py).  A run starts
+at stage 0 and moves up a stage every MUSIC_STAGE_EVERY walls/obstacles
+passed; each change fades the old tune out while the new one fades in.
+"""
 
 from . import config
 from .assetgen.audio import MUSIC_STAGES
 
 
 class SoundManager:
+    """Plays effects by name and handles the music for the current theme."""
+
     def __init__(self, base, res, enabled=True):
         self.base = base
         self.res = res
         self.enabled = enabled
-        self._sfx = {}
+        self._sfx = {}            # loaded sound effects by name
         self.theme_key = None
-        self.tracks = {}
+        self.tracks = {}          # loaded music by stage number (current theme)
         self.current = None       # (stage, sound)
         self.fading = []          # sounds fading out
         self.fade_in_time = 2.5
@@ -23,6 +30,7 @@ class SoundManager:
 
     # -- effects -----------------------------------------------------------
     def play(self, name, volume=1.0, rate=1.0):
+        """Play sound effect `name`.  rate > 1 plays it faster and higher."""
         if not self.enabled:
             return
         snd = self._sfx.get(name)
@@ -35,6 +43,7 @@ class SoundManager:
 
     # -- music -------------------------------------------------------------
     def set_theme(self, theme_key):
+        """Switch to another theme's music (unloads the old theme's tunes)."""
         if theme_key == self.theme_key:
             return
         self.stop_music()
@@ -44,6 +53,7 @@ class SoundManager:
         self.theme_key = theme_key
 
     def _track(self, stage):
+        """(stage index, looping music) for a stage, loading it if needed."""
         stage = self.stage_index(stage)
         if stage not in self.tracks:
             snd = self.base.loader.loadMusic(self.res.music_path(self.theme_key, stage))
@@ -77,11 +87,14 @@ class SoundManager:
         self._track(stage + 1)            # preload the next tune so it starts without a gap
 
     def stop_music(self):
+        """Fade the current tune out."""
         if self.current:
             self.fading.append(self.current[1])
         self.current = None
 
     def update(self, dt):
+        """Called every frame: move the fades along.  The current tune gets
+        louder up to MUSIC_VOLUME; tunes being replaced get quieter and stop."""
         step = dt / self.fade_in_time * config.MUSIC_VOLUME
         if self.current:
             snd = self.current[1]
@@ -96,6 +109,7 @@ class SoundManager:
 
     # -- toggle ------------------------------------------------------------
     def set_enabled(self, on):
+        """Sound on/off (the S key)."""
         self.enabled = on
         self._apply_enabled()
         if on and self.current:
@@ -104,6 +118,7 @@ class SoundManager:
                 snd.play()
 
     def _apply_enabled(self):
+        """Mute or unmute Panda3D's audio managers (music and effects)."""
         for mgr in [self.base.musicManager] + list(self.base.sfxManagerList):
             if mgr:
                 mgr.setActive(self.enabled)

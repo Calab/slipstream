@@ -1,4 +1,16 @@
-"""Obstacles to avoid and rewards to collect (billboard sprites with shadows)."""
+"""Obstacles to avoid and rewards to collect (billboard sprites with shadows).
+
+What each obstacle looks like and how it behaves is set in
+themes.OBSTACLE_INFO (size, whether it floats, moves, hangs from the
+surface...).  There are three kinds of placement:
+
+* on the floor  (chest, boulder, ...): stands on the sand, never moves
+* floating      (octopus, jellyfish, mine, ...): hovers mid-water, may wander
+* hanging       (iceberg, hook, galleon): hangs down from the surface and sways
+
+Collision uses a circle (or oval) around the dangerous part of the sprite,
+in the x/z plane, only while the fish is level with the obstacle in y.
+"""
 
 import math
 import random
@@ -12,6 +24,7 @@ from .terrain import floor_height
 
 
 class Obstacle:
+    """Something to dodge.  Costs OBSTACLE_DAMAGE health if touched."""
     kind = "obstacle"
 
     def __init__(self, parent, res, name, x, y, z, rng: random.Random, bounds=None):
@@ -21,13 +34,15 @@ class Obstacle:
         self.name = name
         self.size = info["size"] * rng.uniform(0.85, 1.1)
         self.frames = res.frames("obstacles", name)
-        self.bx, self.y, self.bz = x, y, z
-        self.x, self.z = x, z
+        self.bx, self.y, self.bz = x, y, z     # base ("home") position it moves around
+        self.x, self.z = x, z                  # current position
         self.moves = info["moves"]
         self.floating = info["floating"]
         self.hanging = info.get("hanging", False)      # hangs down from the surface
         self.parent = parent
-        self.phase = rng.uniform(0, 6.28)
+        self.phase = rng.uniform(0, 6.28)      # so identical obstacles don't move in step
+        # movement ranges: ax/az = how far it roams sideways/up-down, speed =
+        # how fast; each obstacle picks its own values within these ranges
         mv = info.get("move", dict(ax=(0.8, 2.0), az=(0.4, 1.2), speed=(0.6, 1.2)))
         self.amp_x = rng.uniform(*mv["ax"]) if self.moves else 0.0
         self.amp_z = rng.uniform(*mv["az"]) if self.moves else (0.25 if self.floating else 0.0)
@@ -36,6 +51,8 @@ class Obstacle:
         self.hit = False
         self.passed = False
         self.root = parent.attachNewNode(name)
+        # billboard around the vertical axis only: turns to face the camera but
+        # stays upright
         self.root.setBillboardAxis()
         anchor = "top" if self.hanging else ("center" if self.floating else "bottom")
         # collision: a circle in the x/z plane.  Most sprites fill ~75% of their
@@ -78,7 +95,7 @@ class Obstacle:
             self.tether = card(self.root, None, 0.09, 1.0, anchor="bottom")
             self.tether.setColor(0.18, 0.18, 0.2, 1)
         self.anim = rng.uniform(0, 10)
-        self.update(0.0, 0.0, 0.0)
+        self.update(0.0, 0.0, 0.0)             # place everything for the first frame
 
     def center(self):
         """(x, z) of the dangerous part, used for collisions and the shadow."""
@@ -92,6 +109,8 @@ class Obstacle:
         return self.center()[1]
 
     def update(self, dt, t, player_y):
+        """Move/animate for time t.  Moving obstacles are kept inside the
+        open trench and the water."""
         if self.hanging:
             # drifts a little, bobs at the surface and sways like a pendulum
             self.x = self.bx + math.sin(t * self.speed + self.phase) * self.amp_x
@@ -112,11 +131,12 @@ class Obstacle:
         # floor objects sit slightly into the sand so they look grounded
         self.root.setPos(self.x, self.y, self.z if (self.floating or self.hanging) else -0.12)
         if self.tether is not None:
+            # stretch the chain from the floor (z = 0) up to the mine
             h = max(0.1, self.z - self.size * 0.3)
             self.tether.setScale(1, 1, h)
             self.tether.setZ(-self.z)
         if len(self.frames) > 1:
-            self.anim += dt * 7
+            self.anim += dt * 7                # 7 animation frames per second
             self.sprite.setTexture(self.frames[int(self.anim) % len(self.frames)], 1)
         if self.hanging:
             cx, cz = self.center()
@@ -126,28 +146,33 @@ class Obstacle:
         else:
             self.shadow.update(self.x, self.y + self.size * 0.12, 0.0)
             self.shadow.np.setColor(0, 0, 0, 0.75)
-        # fade the sprite a little once it is behind the player so it does not block the view
+        # the red danger glow pulses (pulse goes 0..1..0)
         pulse = 0.5 + 0.5 * math.sin(t * 4 + self.phase)
         self.halo.setAlphaScale(0.28 + 0.18 * pulse)
         if self.ring is not None:
             self.ring.setAlphaScale((0.3 + 0.2 * pulse) * (1.0 if player_y <= self.y else 0.0))
+        # fade the sprite out once it is behind the player so it does not block the view
         if player_y > self.y:
             self.root.setAlphaScale(max(0.0, 1 - (player_y - self.y) / 3))
 
     def collides(self, x, y, z, r):
-        if abs(y - self.y) > 0.6 + r:
+        """Would a fish of radius r at (x, y, z) touch this obstacle?"""
+        if abs(y - self.y) > 0.6 + r:          # not level with it yet (or already past)
             return False
         cx, cz = self.center()
-        # oval (or circle) grown by the fish's radius
+        # oval (or circle) grown by the fish's radius; a point (x, z) is inside
+        # an oval with half-widths a, b when (dx/a)^2 + (dz/b)^2 < 1
         return ((x - cx) / (self.rx + r)) ** 2 + ((z - cz) / (self.radius + r)) ** 2 < 1.0
 
     def remove(self):
+        """Remove this obstacle (and its shadow and floor ring) from the scene."""
         self.shadow.remove()
         if self.ring is not None:
             self.ring.removeNode()
         self.root.removeNode()
 
 
+# glow colour behind each kind of reward
 REWARD_GLOW = {
     "pearl": (1.0, 0.9, 1.0),
     "shell": (1.0, 0.75, 0.6),
@@ -157,11 +182,13 @@ REWARD_GLOW = {
 
 
 class Reward:
+    """A glowing pickup that restores health when the fish swims into it."""
     kind = "reward"
 
     def __init__(self, parent, res, name, x, y, z, rng: random.Random):
         self.name = name
         self.health, self.size = REWARD_INFO[name]
+        # 0 = smallest reward .. 3 = biggest; picks the matching chime sound
         self.level = list(REWARD_INFO).index(name)
         self.x, self.y, self.z = x, y, z
         self.phase = rng.uniform(0, 6.28)
@@ -180,10 +207,11 @@ class Reward:
         self.sprite = card(self.root, res.texture("rewards", f"{name}.png"), self.size, self.size)
         self.sprite.setDepthWrite(False)
         self.shadow = Shadow(parent, res.texture("fx", "shadow.png"), self.size * 0.7)
-        self.pop = 0.0
+        self.pop = 0.0          # seconds since collected (drives the "pop" animation)
         self.update(0, 0, 0)
 
     def update(self, dt, t, player_y):
+        """Bob, spin and pulse; once taken, swell up and fade away."""
         z = self.z + math.sin(t * 2 + self.phase) * 0.25
         self.root.setPos(self.x, self.y, z)
         if self.taken:
@@ -202,17 +230,22 @@ class Reward:
             self.shadow.np.hide()
 
     def collides(self, x, y, z, r):
+        """Is a fish of radius r at (x, y, z) touching this reward?"""
         if self.taken or abs(y - self.y) > 0.8:
             return False
         rr = self.size * 0.5 + r
         return (x - self.x) ** 2 + (z - self.z) ** 2 < rr * rr
 
     def remove(self):
+        """Remove this reward and its shadow from the scene."""
         self.shadow.remove()
         self.root.removeNode()
 
 
 def obstacle_height(name, rng):
+    """Starting z for a new obstacle: the surface for hanging ones, the floor
+    for floor ones, and a random height (clear of floor and surface) for
+    floating ones."""
     info = OBSTACLE_INFO[name]
     if info.get("hanging"):
         return config.WORLD_H

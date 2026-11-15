@@ -14,6 +14,8 @@ R = config.FORWARD_SPEED_RAMP
 
 
 def forward_speed(t):
+    """Forward speed t seconds into a run: starts at S0 and rises smoothly
+    towards S1 without ever quite reaching it (exponential approach)."""
     return S0 + (S1 - S0) * (1 - math.exp(-t / R))
 
 
@@ -23,7 +25,12 @@ def distance_at(t):
 
 
 def time_at(y):
-    """Inverse of distance_at (bisection; distance is monotonic in time)."""
+    """Inverse of distance_at (bisection; distance is monotonic in time).
+
+    There is no neat formula for this, so it is found by halving a search
+    interval 50 times.  The fish is never slower than S0, so it reaches y
+    within y / S0 seconds - a safe upper bound to start from.
+    """
     lo, hi = 0.0, max(1.0, y / S0)
     for _ in range(50):
         mid = (lo + hi) / 2
