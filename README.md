@@ -166,3 +166,5 @@ uses the clownfish as its icon. Notes:
 * Windows may show a SmartScreen warning ("Windows protected your PC") for a
   new, unsigned program; choose *More info → Run anyway*. Code-signing the
   .exe removes this.
+
+**Slipstream was developed using Claude Code AI**
