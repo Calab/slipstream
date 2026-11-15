@@ -24,7 +24,14 @@ def custom_dirs():
     """
     dirs = []
     if getattr(sys, "frozen", False):
-        dirs.append(Path(sys.executable).resolve().parent / "custom")
+        here = Path(sys.executable).resolve().parent
+        # macOS: the program sits inside Slipstream.app/Contents/MacOS, so
+        # look next to the .app instead (where a player would put the folder)
+        for parent in here.parents:
+            if parent.suffix == ".app":
+                here = parent.parent
+                break
+        dirs.append(here / "custom")
     dirs.append(CUSTOM_DIR)
     return dirs
 

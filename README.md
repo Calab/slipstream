@@ -142,8 +142,8 @@ by Fredrick R. Brennan, under the SIL Open Font License 1.1
 
 ## Building a standalone executable
 
-Players don't need Python: this builds one self-contained file. Building it
-needs Python 3.9–3.14 (3.13 recommended).
+Players don't need Python: this builds one self-contained program. Building
+it needs Python 3.9–3.14 (3.13 recommended).
 
 * **Windows:** double-click `tools\build_windows.bat` (or run it in a Command
   Prompt). It uses the virtual environment `.win_venv` (created if missing, and
@@ -152,7 +152,12 @@ needs Python 3.9–3.14 (3.13 recommended).
   If Python is missing it tells you where to get it; tick "Add python.exe to
   PATH" when installing.
 * **Linux:** run `./tools/build_linux.sh`, which builds `dist/slipstream`.
-* **By hand** (either system, inside the project's virtual environment):
+* **macOS:** in Terminal, run `./tools/build_macos.sh`. It uses the virtual
+  environment `.mac_venv` (`VENV=name ./tools/build_macos.sh` to use another)
+  and builds the app bundle `dist/Slipstream.app`, plus
+  `dist/Slipstream-macos-<arm64|x86_64>.zip` for sharing. If Python is missing,
+  install it from python.org or with Homebrew (`brew install python@3.13`).
+* **By hand** (any system, inside the project's virtual environment):
   `pip install pyinstaller` then `python tools/build_binary.py`.
 
 The result is about 115 MB with all art, sounds and music already inside, and
@@ -162,12 +167,21 @@ uses the clownfish as its icon. Notes:
   executables on Linux or the other way round).
 * On Linux, build on the oldest distribution you want to support; a binary
   built on a newer system often won't run on older ones.
+* On macOS, build once on an Apple silicon Mac and once on an Intel Mac if you
+  want both; each app runs only on the kind it was built on.
 * Players can still use their own art: a `custom` folder placed **next to the
-  executable** (same layout as `custom/`) overrides the built-in files.
+  executable** (on macOS, next to `Slipstream.app`; same layout as `custom/`)
+  overrides the built-in files.
 * The build settings live in `tools/slipstream.spec` (it leaves out parts of
   Panda3D the game doesn't use, to keep the file smaller).
 * Windows may show a SmartScreen warning ("Windows protected your PC") for a
   new, unsigned program; choose *More info → Run anyway*. Code-signing the
   .exe removes this.
+* macOS blocks apps from unidentified developers that were downloaded or
+  copied from elsewhere. The first time, right-click (Control-click)
+  `Slipstream.app` → *Open* → *Open*; on recent macOS, if there is no *Open*
+  button, go to *System Settings → Privacy & Security* and choose *Open
+  Anyway*. Or, in Terminal: `xattr -dr com.apple.quarantine Slipstream.app`.
+  Signing and notarizing with a paid Apple Developer ID removes this.
 
 **Slipstream was developed using Claude Code AI**

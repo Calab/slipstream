@@ -5,6 +5,7 @@
 !/README.md
 !/license.txt   
 !/*.ico
+!/*.icns
 !/*icon.png
 !/screenshot*.png
 !.gitignore
