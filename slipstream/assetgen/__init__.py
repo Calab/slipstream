@@ -7,6 +7,7 @@ All images, textures, sound effects and music are generated on first run
 
 import json
 import shutil
+import sys
 from pathlib import Path
 
 from .. import config
@@ -17,8 +18,31 @@ WALL_PX_W = int(2 * (config.HALF_W + config.WALL_EXTRA) * config.PPU)
 WALL_PX_H = int(config.WORLD_H * config.PPU)
 
 
+def _assets_current(folder):
+    """True if `folder` holds assets made by this version of the generators."""
+    try:
+        return json.loads((folder / "version.json").read_text()).get("version") == config.ASSET_VERSION
+    except (OSError, ValueError):
+        return False
+
+
 def default_asset_dir():
-    """Project ``assets/`` folder if writable, otherwise a per-user data dir."""
+    """Where assets live.
+
+    * Packaged build (PyInstaller): the assets shipped inside it, if they are
+      current; otherwise generated once into the per-user data folder (a
+      single-file build unpacks to a temporary folder that is deleted on exit).
+    * Running from source: the project ``assets/`` folder if writable,
+      otherwise the per-user data folder.
+    """
+    from ..save import user_data_dir
+    if getattr(sys, "frozen", False):
+        bundled = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent)) / "assets"
+        if _assets_current(bundled):
+            return bundled
+        p = user_data_dir() / "assets"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
     project = Path(__file__).resolve().parents[2] / "assets"
     try:
         project.mkdir(parents=True, exist_ok=True)
@@ -27,7 +51,6 @@ def default_asset_dir():
         probe.unlink()
         return project
     except OSError:
-        from ..save import user_data_dir
         p = user_data_dir() / "assets"
         p.mkdir(parents=True, exist_ok=True)
         return p
@@ -78,6 +101,8 @@ class AssetBuilder:
             (P("fx", "halo.png"), sprites.halo),
             (P("fx", "glow.png"), sprites.glow),
             (P("fx", "soft.png"), sprites.soft),
+            (P("fx", "icon.png"), sprites.app_icon),
+            (P("fx", "icon.ico"), sprites.app_icon),       # Windows program icon
             (P("fx", "marker_last.png"), lambda: sprites.marker((255, 200, 60))),
             (P("fx", "marker_best.png"), lambda: sprites.marker((90, 255, 140))),
             (P("fx", "light_ray.png"), textures.light_ray),

@@ -5,6 +5,7 @@ names as the generated ``assets/`` folder), so your own art and sounds replace
 the generated ones.  ``custom/`` is never modified by the game.
 """
 
+import sys
 from pathlib import Path
 
 from panda3d.core import Filename, SamplerState, Texture
@@ -12,26 +13,41 @@ from panda3d.core import Filename, SamplerState, Texture
 from .assetgen import AssetBuilder
 
 CUSTOM_DIR = Path(__file__).resolve().parents[1] / "custom"
+
+
+def custom_dirs():
+    """Folders searched for replacement art and sounds, in order.
+
+    In a packaged build a ``custom`` folder next to the program comes first, so
+    players can add their own files without rebuilding; then the ``custom``
+    folder bundled into the build (or the project's, when running from source).
+    """
+    dirs = []
+    if getattr(sys, "frozen", False):
+        dirs.append(Path(sys.executable).resolve().parent / "custom")
+    dirs.append(CUSTOM_DIR)
+    return dirs
 IMAGE_EXTS = (".png", ".jpg", ".jpeg")
 SOUND_EXTS = (".wav", ".ogg", ".mp3", ".flac")
 
 
 class Resources:
-    def __init__(self, base, builder: AssetBuilder, custom_dir=CUSTOM_DIR):
+    def __init__(self, base, builder: AssetBuilder, custom_dir=None):
         self.base = base
         self.builder = builder
-        self.custom = Path(custom_dir)
+        self.custom = [Path(custom_dir)] if custom_dir else custom_dirs()
         self._tex = {}
         self._sfx = {}
 
     def custom_path(self, *parts):
         """The override for an asset in custom/ (any supported extension), or None."""
-        p = self.custom.joinpath(*parts)
-        exts = IMAGE_EXTS if p.suffix.lower() in IMAGE_EXTS else SOUND_EXTS
-        for ext in (p.suffix,) + tuple(e for e in exts if e != p.suffix):
-            q = p.with_suffix(ext)
-            if q.is_file():
-                return q
+        for folder in self.custom:
+            p = folder.joinpath(*parts)
+            exts = IMAGE_EXTS if p.suffix.lower() in IMAGE_EXTS else SOUND_EXTS
+            for ext in (p.suffix,) + tuple(e for e in exts if e != p.suffix):
+                q = p.with_suffix(ext)
+                if q.is_file():
+                    return q
         return None
 
     def path(self, *parts):

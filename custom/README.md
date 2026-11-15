@@ -9,6 +9,9 @@ example, to replace Neptune, save your picture as:
 
     custom/obstacles/neptune_0.png
 
+In the standalone executable, put a `custom` folder with the same layout **next
+to the executable**; it takes priority over the files built into it.
+
 Restart the game to see changes. To compare with the originals, look at the
 matching file in `assets/` (created on first run).
 

@@ -13,10 +13,49 @@ def user_data_dir():
     elif sys.platform == "darwin":
         p = Path.home() / "Library" / "Application Support" / "Slipstream"
     else:
-        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+        # Linux etc.: ~/.config/slipstream (or $XDG_CONFIG_HOME/slipstream)
+        base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
         p = base / "slipstream"
     p.mkdir(parents=True, exist_ok=True)
+    _migrate_old_save(p)
     return p
+
+
+def user_data_dir_display():
+    """The save folder written the way players of each system expect:
+    %APPDATA%\\Slipstream on Windows (can be pasted into File Explorer),
+    ~/... on Linux and macOS."""
+    path = user_data_dir()
+    if sys.platform.startswith("win"):
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            try:
+                return "%APPDATA%\\" + str(path.relative_to(Path(appdata)))
+            except ValueError:
+                pass
+        return str(path)
+    home = Path.home()
+    try:
+        return "~/" + path.relative_to(home).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def _migrate_old_save(new_dir):
+    """Earlier versions kept the save in ~/.local/share/slipstream; copy it
+    over once so best times and settings carry across."""
+    if sys.platform.startswith("win") or sys.platform == "darwin":
+        return
+    new = new_dir / "save.json"
+    if new.exists():
+        return
+    old_base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    old = old_base / "slipstream" / "save.json"
+    try:
+        if old.is_file():
+            new.write_text(old.read_text())
+    except OSError:
+        pass
 
 
 DEFAULTS = {"theme": "reef", "sound": True, "touch": None, "aim": True, "window": None, "records": {}}

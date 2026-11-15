@@ -100,6 +100,7 @@ class SlipstreamApp:
         msg.destroy()
 
         self.res = Resources(base, builder)
+        self._set_window_icon()
         self.sound = SoundManager(base, self.res, bool(self.save["sound"]))
 
         # --- input state -----------------------------------------------------
@@ -109,6 +110,12 @@ class SlipstreamApp:
                 base.accept(k, self.keys.__setitem__, [k, True])
             base.accept(k + "-up", self.keys.__setitem__, [k, False])
         base.accept("a", self.on_a)
+        # "?" is typed differently on different keyboards, so watch the typed
+        # character rather than a particular key.  Panda3D only sends these
+        # "keystroke" events when they are switched on for the keyboard.
+        for bt in getattr(base, "buttonThrowers", None) or []:
+            bt.node().setKeystrokeEvent("keystroke")
+        base.accept("keystroke", self.on_keystroke)
         for key, fn in (("t", self.on_t), ("s", self.on_s), ("r", self.on_r), ("q", self.on_q),
                         ("escape", self.on_escape), ("space", self.on_space),
                         ("p", self.toggle_pause), ("b", self.toggle_touch)):
@@ -117,13 +124,14 @@ class SlipstreamApp:
         # --- UI ----------------------------------------------------------------
         from .ui.band import SurfaceBand
         from .ui.hud import HUD
-        from .ui.menu import GameOverPanel, PausePanel, StartMenu
+        from .ui.menu import AboutPanel, GameOverPanel, PausePanel, StartMenu
         from .ui.touch import TouchControls
         self.band = SurfaceBand(base, self.res)
         self.hud = HUD(base)
         self.menu = StartMenu(base, self)
         self.gameover = GameOverPanel(base, self)
         self.pause_panel = PausePanel(base, self)
+        self.about = AboutPanel(base, self)
         self.touch = TouchControls(base, self.res, self.keys, self.toggle_pause)
         touch = self.save["touch"]
         self.touch_on = bool(touch) if touch is not None else sys.platform == "android"
@@ -231,6 +239,18 @@ class SlipstreamApp:
         self._finish_run()
         self.world.bubbles.spawn(self.world.player.x, self.world.player.y, self.world.player.z, count=25,
                                  spread=0.8)
+
+    def _set_window_icon(self):
+        """Clownfish icon for the window / taskbar (.ico on Windows)."""
+        from panda3d.core import WindowProperties
+        if self.args.offscreen:
+            return
+        name = "icon.ico" if sys.platform.startswith("win") else "icon.png"
+        path = self.res.path("fx", name)
+        if path.exists():
+            wp = WindowProperties()
+            wp.setIconFilename(Filename.fromOsSpecific(str(path)))
+            self.base.win.requestProperties(wp)
 
     def _restore_window_size(self):
         """Ask for the saved size again once the window is open.  Some desktops
@@ -341,13 +361,35 @@ class SlipstreamApp:
         if self.state == "menu":
             self.quit()
 
-    def on_escape(self):
+    def on_keystroke(self, key):
+        if key in ("?", "/"):        # "/" is the same key without Shift on many keyboards
+            self.toggle_about()
+
+    def toggle_about(self):
+        """Open or close the About page (from the title screen)."""
         if self.state == "menu":
+            self.state = "about"
+            self.menu.hide()
+            self.about.show()
+            self.sound.play("click")
+        elif self.state == "about":
+            self.state = "menu"
+            self.about.hide()
+            self.menu.show()
+            self.sound.play("click")
+
+    def on_escape(self):
+        if self.state == "about":
+            self.toggle_about()
+        elif self.state == "menu":
             self.quit()
         else:
             self.to_menu()
 
     def on_space(self):
+        if self.state == "about":
+            self.toggle_about()
+            return
         if self.state in ("menu", "gameover"):
             self.start_run()
         elif self.state == "paused":
@@ -367,7 +409,7 @@ class SlipstreamApp:
         self.band.update(self.world.time, cam_x)
         if self.state == "play":
             self._update_play(dt)
-        elif self.state == "menu":
+        elif self.state in ("menu", "about"):
             self._update_attract(dt)
         elif self.state == "gameover":
             self.world.update(dt, 0, 0, 2.0, 0.0, active=False)

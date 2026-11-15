@@ -23,7 +23,7 @@ The first launch takes a few seconds to generate assets into `./assets`.
 `python tools/generate_assets.py --force` rebuilds them.
 
 Works on Linux, Windows and macOS (Python 3.9+). Saves and best times are stored in
-`~/.local/share/slipstream` (Linux), `%APPDATA%\Slipstream` (Windows) or
+`~/.config/slipstream` (Linux), `%APPDATA%\Slipstream` (Windows) or
 `~/Library/Application Support/Slipstream` (macOS).
 
 ## Controls
@@ -37,6 +37,7 @@ Works on Linux, Windows and macOS (Python 3.9+). Saves and best times are stored
 | S | Sound on/off | |
 | R | Reset best time for the theme | |
 | A | Aim helper on/off | |
+| ? | About Slipstream (version, credits) | |
 | B | Touch buttons on/off | Touch buttons on/off |
 | P | | Pause |
 | Q / Esc | Quit | Esc: back to the menu |
@@ -123,6 +124,10 @@ slipstream/
   ui/                       HUD, surface band (waves + boat), menus, touch buttons
   fonts/                    Some Time Later font + licence
 tools/generate_assets.py    pre-generate / rebuild assets
+tools/build_binary.py       build a single-file executable (PyInstaller)
+tools/build_windows.bat     one-step Windows build (uses .win_venv, builds the .exe)
+tools/build_linux.sh        one-step Linux build
+tools/slipstream.spec       PyInstaller settings used by build_binary.py
 custom/                     your replacement art & sounds (overrides assets/)
 ```
 
@@ -132,10 +137,32 @@ Text uses the [Some Time Later](https://github.com/ctrlcctrlv/some-time-later) f
 by Fredrick R. Brennan, under the SIL Open Font License 1.1
 (`slipstream/fonts/LICENSE-SomeTimeLater.txt`).
 
-## Android
+## Building a standalone executable
 
-Panda3D has experimental Android support (`build_apps` with the Android
-platform tag in Panda3D 1.11). The game already includes the pieces it would
-need: the touch buttons, assets that are generated rather than bundled, and a
-writable-directory fallback for the asset cache. A packaging setup would still
-have to be added.
+Players don't need Python: this builds one self-contained file. Building it
+needs Python 3.9–3.14 (3.13 recommended).
+
+* **Windows:** double-click `tools\build_windows.bat` (or run it in a Command
+  Prompt). It uses the virtual environment `.win_venv` (created if missing, and
+  kept separate from a Linux `.venv` in a shared folder; `set VENV=name` first to
+  use another), installs everything and builds `dist\slipstream.exe`.
+  If Python is missing it tells you where to get it; tick "Add python.exe to
+  PATH" when installing.
+* **Linux:** run `./tools/build_linux.sh`, which builds `dist/slipstream`.
+* **By hand** (either system, inside the project's virtual environment):
+  `pip install pyinstaller` then `python tools/build_binary.py`.
+
+The result is about 115 MB with all art, sounds and music already inside, and
+uses the clownfish as its icon. Notes:
+
+* Build on each platform you want to ship for (PyInstaller can't build Windows
+  executables on Linux or the other way round).
+* On Linux, build on the oldest distribution you want to support; a binary
+  built on a newer system often won't run on older ones.
+* Players can still use their own art: a `custom` folder placed **next to the
+  executable** (same layout as `custom/`) overrides the built-in files.
+* The build settings live in `tools/slipstream.spec` (it leaves out parts of
+  Panda3D the game doesn't use, to keep the file smaller).
+* Windows may show a SmartScreen warning ("Windows protected your PC") for a
+  new, unsigned program; choose *More info → Run anyway*. Code-signing the
+  .exe removes this.

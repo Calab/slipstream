@@ -886,6 +886,17 @@ def halo():
     return Image.fromarray(arr, "RGBA")
 
 
+def app_icon():
+    """Program icon: the clownfish on a round sea-blue badge."""
+    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    img.alpha_composite(radial_layer((S, S), (8, 8, S - 8, S - 8), (90, 200, 235), (15, 70, 130),
+                                     hl=(-0.3, -0.4)))
+    ImageDraw.Draw(img).ellipse((8, 8, S - 8, S - 8), outline=(255, 255, 255, 255), width=14)
+    fish = fish_frame("fish_clown", 0.18).resize((400, 400), Image.LANCZOS)
+    img.alpha_composite(fish, (56, 62))
+    return img.resize((256, 256), Image.LANCZOS)
+
+
 def shadow():
     size = 128
     yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
