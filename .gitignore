@@ -9,6 +9,7 @@
 !/*icon.png
 !/screenshot*.png
 !.gitignore
+!/slipstream.png
 
 # Slipstream (assets/ and .venv/ are generated, so they stay ignored)
 !/main.py
